@@ -164,6 +164,7 @@ git push
 | Pages 打开是 404 | ① Branch 是否 `main`、目录是否 `/ (root)`；② `index.html` 是否在仓库根目录；③ 刚 Save 要等 1~3 分钟 |
 | Pages 推送后页面没变 | 强制刷新 **Cmd + Shift + R**；再看仓库 **Actions** 里 pages-build-deployment 是否跑完 |
 | 网址打开后数据是空的 | 正常：`https://` 和 `file://` 是两个源。到设置里登录一次云端账号就会自动拉取 |
+| `git push` 卡住 / `CONNECT tunnel failed` / 连不上 github.com | 网络到 GitHub 不通（国内常见）。**Pages 只是「打开更方便」，数据同步不依赖它**：把整个文件夹用 U 盘 / iCloud 拷到另一台电脑，双击 `index.html` 登录 Supabase 即可。仍想部署就给 git 挂代理：`git config --global http.proxy http://127.0.0.1:7890`（端口换成你代理软件的），取消用 `git config --global --unset http.proxy` |
 
 ## 七、目录
 
