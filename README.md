@@ -96,17 +96,17 @@ git log --oneline        # 应该看到 2 次提交
 
 ### 步骤 2：推上去
 
-把 `<用户名>` 换成你自己的 GitHub 用户名，在项目目录里执行：
+远程地址已经在这台电脑上登记好了（`origin` → `https://github.com/Stella9293/stella-math-workbench.git`），所以**只需要推**：
 
 ```bash
 cd ~/WorkBuddy/2026-10-17-12-27-32
+git push -u origin main
+```
 
-# 二选一：HTTPS（会弹窗让你登录/填 token）
-git remote add origin https://github.com/<用户名>/stella-math-workbench.git
+如果是在全新的机器上重来一遍，就得先登记地址再推：
 
-# 或者 SSH（本机已配好 SSH key 的话更省事）
-# git remote add origin git@github.com:<用户名>/stella-math-workbench.git
-
+```bash
+git remote add origin https://github.com/Stella9293/stella-math-workbench.git
 git push -u origin main
 ```
 
@@ -121,10 +121,10 @@ git push -u origin main
 4. 等 1~3 分钟，页面顶部会出现绿底提示 **Your site is live at …**，网址是：
 
 ```
-https://<用户名>.github.io/stella-math-workbench/
+https://stella9293.github.io/stella-math-workbench/
 ```
 
-（`index.html` 必须放在仓库根目录，这就是目录要选 root 的原因。以后每次 `git push`，Pages 会在 1 分钟左右自动重建。）
+（GitHub Pages 的域名统一用小写用户名。`index.html` 必须放在仓库根目录，这就是目录要选 root 的原因。以后每次 `git push`，Pages 会在 1 分钟左右自动重建。）
 
 ### 步骤 4：在这个网址上接云端
 
