@@ -1,0 +1,9 @@
+# macOS
+.DS_Store
+
+# 工作台的本地笔记 / 记忆（不进仓库）
+.workbuddy/
+
+# 临时文件
+*.log
+*.tmp
