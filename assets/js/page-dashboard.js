@@ -46,6 +46,9 @@
       var latest = U.latestExam(db.meta.currentClassId);
 
       var html = '';
+      /* 校历倒计时：距离最近假期还有多少天 */
+      if (App.cal) html += App.cal.cardHTML();
+
       html += '<div class="grid g-4 mb16">';
       html += statCard('accent', '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.4"/></svg>',
         '班级总数', db.classes.length, ' 个', '共 ' + db.students.length + ' 名学生');
@@ -137,6 +140,8 @@
       el.innerHTML = html;
 
       /* ---- 事件 ---- */
+      if (App.cal) App.cal.bind(el);
+
       var input = el.querySelector('#todoInput');
       function addTodo() {
         var v = input.value.trim();

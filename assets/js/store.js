@@ -229,7 +229,7 @@
     d.meta = d.meta || { teacher: 'Stella', currentClassId: null, maskNames: false };
     d.settings = d.settings || { ai: {} };
     d.settings.ai = d.settings.ai || {};
-    ['classes', 'students', 'tasks', 'periods', 'entries', 'curriculum', 'records', 'exams', 'papers', 'comms', 'mistakes', 'summaries', 'syllabus'].forEach(function (k) {
+    ['classes', 'students', 'tasks', 'periods', 'entries', 'curriculum', 'records', 'exams', 'papers', 'comms', 'mistakes', 'summaries', 'syllabus', 'calendar'].forEach(function (k) {
       if (!Array.isArray(d[k])) d[k] = [];
     });
     d.slots = d.slots || {};
