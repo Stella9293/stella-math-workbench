@@ -73,17 +73,81 @@
 - 新电脑登录成功、数据拉下来之后再开始改，避免两边同时改触发「待合并」；
 - 只想在这台机器上用、不想上传：点 **「退出登录」**，顶栏会回到虚线「仅本地」，数据仍全部留在本机。
 
-## 五、部署到 GitHub Pages（可选）
+## 五、部署到 GitHub Pages（换电脑 / 手机打开的推荐方式）
+
+GitHub Pages = 把仓库里的静态文件直接托管成一个网址。这个项目没有构建步骤，**把文件夹推上去、把仓库设成 Pages，就完事**。
+
+### 步骤 0：本机仓库（已在此电脑做好）
+
+这台电脑上已经初始化好了：`.git` 已建、`.gitignore` 已写（排除 `.workbuddy/`、`.DS_Store`）、首个提交 `ac62e6d` 已在 `main` 分支。
 
 ```bash
-git init && git add . && git commit -m "workbench"
-git remote add origin git@github.com:<你的用户名>/<仓库名>.git
+cd ~/WorkBuddy/2026-10-17-12-27-32
+git log --oneline        # 应该看到 2 次提交
+```
+
+### 步骤 1：在 GitHub 建一个空仓库
+
+1. 登录 [github.com](https://github.com)，点右上角 **+ → New repository**。
+2. **Repository name** 填 `stella-math-workbench`（名字会直接变成网址的一部分，先用英文短横线）。
+3. 可见性选 **Public**（免费账号的 Pages 只支持公开仓库；想私有需要 Pro）。
+4. **不要**勾 Add a README / .gitignore / license（本地已经有文件了，勾了会冲突）。
+5. 点 **Create repository**，复制它给你的那两行地址（HTTPS 或 SSH 都行）。
+
+### 步骤 2：推上去
+
+把 `<用户名>` 换成你自己的 GitHub 用户名，在项目目录里执行：
+
+```bash
+cd ~/WorkBuddy/2026-10-17-12-27-32
+
+# 二选一：HTTPS（会弹窗让你登录/填 token）
+git remote add origin https://github.com/<用户名>/stella-math-workbench.git
+
+# 或者 SSH（本机已配好 SSH key 的话更省事）
+# git remote add origin git@github.com:<用户名>/stella-math-workbench.git
+
 git push -u origin main
 ```
 
-仓库 **Settings → Pages** → Source 选 `main` / `root` → 保存，几十秒后得到 `https://<用户名>.github.io/<仓库名>/`。
+- HTTPS 方式如果提示密码错误：GitHub 早已不接受账号密码，要去 **Settings → Developer settings → Personal access tokens** 生成一个 token 当密码用；更省事的办法是装 [GitHub Desktop](https://desktop.github.com/) 点几下完成推送。
+- 推送成功后刷新仓库页面，应该能看到 `index.html`、`assets/`、`supabase/`。
 
-> ⚠️ `file://` 与 `https://` 是**两个不同的浏览器源**，本地缓存各自独立。同一台电脑建议固定用一种方式打开，否则会出现两个副本靠云端合并的情况。
+### 步骤 3：打开 Pages
+
+1. 仓库页 → **Settings**（顶部）→ 左侧 **Pages**。
+2. **Source** 选 **Deploy from a branch**。
+3. **Branch** 选 `main`，目录选 **/ (root)**，点 **Save**。
+4. 等 1~3 分钟，页面顶部会出现绿底提示 **Your site is live at …**，网址是：
+
+```
+https://<用户名>.github.io/stella-math-workbench/
+```
+
+（`index.html` 必须放在仓库根目录，这就是目录要选 root 的原因。以后每次 `git push`，Pages 会在 1 分钟左右自动重建。）
+
+### 步骤 4：在这个网址上接云端
+
+- 第一次用这个网址打开时，`localStorage` 是空的（网址和双击打开的 `file://` 不是同一个源）。
+- 到 **设置 → 云端同步** 填 **Project URL + anon public key + 邮箱密码** → 点「登录并开启同步」→ 自动把云端数据拉下来。
+- 之后这台电脑就固定用这个网址，别再用 `file://` 打开，避免两个副本互相覆盖。
+
+### 步骤 5：以后改了东西怎么更新
+
+```bash
+git add -A
+git commit -m "改了什么"
+git push
+```
+
+推送后等 1 分钟左右，浏览器 **Cmd + Shift + R** 强制刷新（Pages 有 CDN 缓存，普通刷新可能还是旧文件）。
+
+### 几点要知道的
+
+- **仓库是公开的，但数据不在仓库里。** 学生数据存在浏览器 `localStorage` + Supabase；Supabase 的 anon key 只存在本机，不写进代码。代码本身是公开的，没有隐私内容。
+- **`.workbuddy/` 已被 .gitignore 排除**，本地笔记/记忆不会上传。
+- **手机也能用**：同一网址在手机浏览器打开，登录同一账号即可；`localStorage` 是各自的，数据靠云端同步。
+- **自定义域名**（可选）：Pages 页面里填 Custom domain，把域名 CNAME 指过去即可，不影响使用。
 
 ## 六、常见问题
 
@@ -97,6 +161,9 @@ git push -u origin main
 | 新电脑登录后还是空的 | 先看顶栏是不是「已同步」；仍是「未登录」说明密码没填/没点登录。登录成功却为空，多半是云端那条快照还没上传过——回老电脑确认顶栏是绿色「已同步」 |
 | 密码忘了 | 工作台没有「找回密码」入口。到 Supabase → **Authentication → Users**，找到那个邮箱点重置密码。注意：**别新建一个用户来代替它**，云端数据是按 user_id 隔离的，新用户看到的是一份空库 |
 | 关掉浏览器再打开数据没了 | 到「设置 → 本地数据」看大小是否为 0；若 localStorage 被清，重开时会自动从 IndexedDB 恢复 |
+| Pages 打开是 404 | ① Branch 是否 `main`、目录是否 `/ (root)`；② `index.html` 是否在仓库根目录；③ 刚 Save 要等 1~3 分钟 |
+| Pages 推送后页面没变 | 强制刷新 **Cmd + Shift + R**；再看仓库 **Actions** 里 pages-build-deployment 是否跑完 |
+| 网址打开后数据是空的 | 正常：`https://` 和 `file://` 是两个源。到设置里登录一次云端账号就会自动拉取 |
 
 ## 七、目录
 
