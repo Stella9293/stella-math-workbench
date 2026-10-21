@@ -137,6 +137,7 @@ git push -u origin main
 ```
 
 - HTTPS 方式如果提示密码错误：GitHub 早已不接受账号密码，要去 **Settings → Developer settings → Personal access tokens** 生成一个 token 当密码用；更省事的办法是装 [GitHub Desktop](https://desktop.github.com/) 点几下完成推送。
+- **用 GitHub Desktop 推的**（File → Add local repository → Publish repository）：推到看到 "Last fetched just now" 就算完成，**直接跳到步骤 3**。注意 Publish 时不要勾 "Keep this code private"，私有仓库用不了免费 Pages。
 - 推送成功后刷新仓库页面，应该能看到 `index.html`、`assets/`、`supabase/`。
 
 ### 步骤 3：打开 Pages
@@ -165,6 +166,8 @@ git add -A
 git commit -m "改了什么"
 git push
 ```
+
+用 GitHub Desktop 的话是三步：左下角 **Summary** 填一句说明 → **Commit to main** → 顶部 **Push origin**。
 
 推送后等 1 分钟左右，浏览器 **Cmd + Shift + R** 强制刷新（Pages 有 CDN 缓存，普通刷新可能还是旧文件）。
 
