@@ -242,9 +242,19 @@
     return d;
   }
 
-  /* ---------------- 本地持久化：localStorage 主存 + IndexedDB 冗余 ---------------- */
+  /* ---------------- 本地持久化：localStorage 主存 + IndexedDB 冗余 ----------------
+     配额策略：localStorage 一个域名只有约 5 MB，试卷截图（dataURL）最容易吃满。
+     写不下时自动降级——把图片从 localStorage 里剔掉（文字数据一条不少），
+     完整版（含图片）立刻写进 IndexedDB；下次打开先读 localStorage，
+     再把 IndexedDB 里的图片接回来。这样「存不下」不再阻塞保存，
+     也不会把无图版当成新数据传到云端（接回图片前禁止上传）。            */
   var IDB_KEY = 'db';
-  var boot = { hadLocal: false, fromSeed: false, restored: false, edited: false, ready: false };
+  var boot = {
+    hadLocal: false, fromSeed: false, restored: false, edited: false, ready: false,
+    slim: null,        // localStorage 里是降级版时的元信息 {at, imgs, bytes}
+    offloaded: false,  // 当前是否处于「图片寄存在 IndexedDB」状态
+    imgPending: false  // 图片还没从 IndexedDB 接回来，此时禁止上传云端
+  };
   /* 首屏加载期间（kb 灌预置库、首屏渲染补 currentClassId）不算「老师改过」 */
   if (document.readyState === 'complete') {
     setTimeout(function () { boot.ready = true; }, 200);
@@ -253,16 +263,45 @@
   }
   var idbTimer = null, idbPending = null;
 
+  function isImg(v) { return typeof v === 'string' && v.slice(0, 11) === 'data:image/'; }
+
+  /* 只读统计：不深拷贝，避免图片大时白占一份内存 */
+  function scanImg(node, stat) {
+    if (typeof node === 'string') {
+      if (isImg(node)) { stat.imgs++; stat.bytes += node.length; }
+      return;
+    }
+    if (Array.isArray(node)) { for (var i = 0; i < node.length; i++) scanImg(node[i], stat); return; }
+    if (node && typeof node === 'object') {
+      for (var k in node) if (Object.prototype.hasOwnProperty.call(node, k)) scanImg(node[k], stat);
+    }
+  }
+
+  /* 原地剔除图片（调用方自己传深拷贝进来） */
+  function slimify(node, stat) {
+    if (typeof node === 'string') {
+      if (isImg(node)) { stat.imgs++; stat.bytes += node.length; return ''; }
+      return node;
+    }
+    if (Array.isArray(node)) { for (var i = 0; i < node.length; i++) node[i] = slimify(node[i], stat); return node; }
+    if (node && typeof node === 'object') {
+      for (var k in node) if (Object.prototype.hasOwnProperty.call(node, k)) node[k] = slimify(node[k], stat);
+    }
+    return node;
+  }
+
   function readStorage() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (!raw) return null;
+      if (!raw) return { db: null, slim: null };
       var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return null;
-      return normalize(parsed);
+      if (!parsed || typeof parsed !== 'object') return { db: null, slim: null };
+      var slim = parsed.__slim || null;
+      if (slim) delete parsed.__slim;       // 标记不进内存库，免得同步到云端
+      return { db: normalize(parsed), slim: slim };
     } catch (e) {
       console.warn('读取本地数据失败', e);
-      return null;
+      return { db: null, slim: null };
     }
   }
 
@@ -271,13 +310,65 @@
     if (idbTimer) clearTimeout(idbTimer);
     idbTimer = setTimeout(flushIdb, 600);
   }
+  function mirrorNow(json, onFail) {
+    if (idbTimer) { clearTimeout(idbTimer); idbTimer = null; }
+    idbPending = { at: Date.now(), data: json };
+    flushIdb(onFail);
+  }
 
-  function flushIdb() {
+  function flushIdb(onFail) {
     if (idbTimer) { clearTimeout(idbTimer); idbTimer = null; }
     var payload = idbPending;
     idbPending = null;
     if (!payload || !App.idb) return;
-    App.idb.set(IDB_KEY, payload)['catch'](function () { /* 容量/隐私模式失败不影响主流程 */ });
+    App.idb.set(IDB_KEY, payload)['catch'](function (e) {
+      console.warn('IndexedDB 写入失败', e);
+      if (onFail) onFail(e);        /* 容量/隐私模式失败不影响主流程 */
+    });
+  }
+
+  /* 写 localStorage；写不下时自动降级为「无图版」，完整版落 IndexedDB */
+  var quotaWarned = false;
+  function persist(json) {
+    try {
+      localStorage.setItem(KEY, json);
+      boot.offloaded = false;
+      boot.slim = null;
+      return true;
+    } catch (e) {
+      var stat = { imgs: 0, bytes: 0 };
+      var slimObj = null;
+      try { slimObj = slimify(JSON.parse(json), stat); } catch (e2) { slimObj = null; }
+      if (slimObj) {
+        var meta = { at: Date.now(), imgs: stat.imgs, bytes: stat.bytes };
+        slimObj.__slim = meta;
+        /* 先把「含图片的完整版」交给 IndexedDB（异步在写），再腾 localStorage 的位置 */
+        mirrorNow(json, function () {
+          App.ui && App.ui.toast('截图没能写进本机缓存，请立刻到「设置」导出备份', 'err', 8000);
+        });
+        try {
+          localStorage.removeItem(KEY);        // 先腾出旧值占的位置，再写轻量版
+          localStorage.setItem(KEY, JSON.stringify(slimObj));
+          boot.slim = meta;
+          boot.offloaded = true;
+          if (!quotaWarned) {
+            quotaWarned = true;
+            App.ui && App.ui.toast(
+              stat.imgs
+                ? '本地空间已满：' + stat.imgs + ' 张截图改存本机缓存，文字数据照常保存'
+                : '本地空间已满：已自动压缩保存，建议到「设置」清理旧数据',
+              '', 5200);
+          }
+          return true;
+        } catch (e3) {
+          console.error(e3);
+        }
+      }
+      console.error(e);
+      mirrorNow(json);                          // 至少保住 IndexedDB 那一份
+      App.ui && App.ui.toast('本地存储写入失败，请先到「设置」导出备份', 'err', 6000);
+      return false;
+    }
   }
 
   /* 立刻写两份（用于导入备份、云端数据落地、关闭页面前） */
@@ -285,27 +376,48 @@
     var json = null;
     try { json = JSON.stringify(db); } catch (e) { console.error(e); }
     if (json == null) return false;
-    var ok = true;
-    try { localStorage.setItem(KEY, json); }
-    catch (e) {
-      ok = false;
-      App.ui && App.ui.toast('本地存储空间不足，请先导出备份并清理部分图片', 'err', 4200);
-      console.error(e);
-    }
-    if (idbTimer) { clearTimeout(idbTimer); idbTimer = null; }
-    idbPending = { at: Date.now(), data: json };
-    flushIdb();
-    return ok;
+    return persist(json);
   }
 
-  var db = (function () {
-    var d = readStorage();
-    if (d) { boot.hadLocal = true; return d; }
-    var s = seed();
+  /* 降级版启动后，把 IndexedDB 里带图片的完整版接回内存 */
+  function hydrate() {
+    if (!boot.slim) return Promise.resolve(false);
+    if (!App.idb) { boot.imgPending = false; return Promise.resolve(false); }
+    boot.imgPending = true;
+    return App.idb.get(IDB_KEY).then(function (rec) {
+      if (!rec || !rec.data) throw new Error('本机缓存为空');
+      var parsed = typeof rec.data === 'string' ? JSON.parse(rec.data) : rec.data;
+      if (!parsed || !Array.isArray(parsed.classes)) throw new Error('本机缓存格式不对');
+      /* 缓存必须是同一时刻的（比 localStorage 旧就说明图片那份没跟上，宁可用新的无图版） */
+      if (boot.slim && boot.slim.at && rec.at && rec.at < boot.slim.at - 3000) throw new Error('本机缓存不是最新');
+      var stat = { imgs: 0, bytes: 0 };
+      scanImg(parsed, stat);
+      if (!stat.imgs) throw new Error('本机缓存里没有图片');
+      delete parsed.__slim;
+      db = normalize(parsed);
+      boot.hadLocal = true;
+      boot.offloaded = true;
+      boot.imgPending = false;
+      return true;
+    })['catch'](function (e) {
+      boot.imgPending = false;
+      console.warn('图片回填失败', e);
+      App.ui && App.ui.toast('本机缓存里的图片暂时读不出来（文字数据完好）', 'err', 5000);
+      return false;
+    });
+  }
+
+  var bootData = readStorage();
+  var db = bootData.db;
+  if (db) {
+    boot.hadLocal = true;
+    boot.slim = bootData.slim;
+    boot.offloaded = !!bootData.slim;
+  } else {
+    db = seed();
     boot.fromSeed = true;
-    try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) { }
-    return s;
-  })();
+    try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { }
+  }
 
   var store = {
     get db() { return db; },
@@ -316,13 +428,8 @@
       try { json = JSON.stringify(db); } catch (e) { json = null; }
       var ok = true;
       if (json != null) {
-        try { localStorage.setItem(KEY, json); }
-        catch (e) {
-          ok = false;
-          App.ui && App.ui.toast('本地存储空间不足，请先导出备份并清理部分图片', 'err', 4200);
-          console.error(e);
-        }
-        mirror(json);
+        ok = persist(json);
+        if (ok && !boot.offloaded) mirror(json);   // 没降级才走 debounce 镜像
       }
       if (!opts.silent && App.sync && App.sync.notifyChange) {
         if (boot.ready) boot.edited = true;
@@ -387,7 +494,22 @@
     exportJSON: function () { return JSON.stringify(db, null, 2); },
     size: function () {
       try { return new Blob([JSON.stringify(db)]).size; } catch (e) { return 0; }
-    }
+    },
+    /* localStorage 实际占用（字符数，配额按字符计） */
+    lsSize: function () {
+      try { return (localStorage.getItem(KEY) || '').length; } catch (e) { return 0; }
+    },
+    /* 图片统计：张数 + 体积（字节，按 base64 字符近似） */
+    imgStat: function () {
+      var s = { imgs: 0, bytes: 0 };
+      scanImg(db, s);
+      s.bytes = Math.round(s.bytes * 0.75);
+      return s;
+    },
+    /* 降级信息：{ at, imgs, bytes } 或 null */
+    slimInfo: function () { return boot.slim; },
+    /* 启动时把 IndexedDB 里的图片接回来；返回是否接了图 */
+    hydrate: hydrate
   };
   App.store = store;
 

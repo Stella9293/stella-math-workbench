@@ -450,6 +450,8 @@
     cfg.dirtyAt = Date.now();
     saveCfg();
     emit();
+    /* 图片还在从本机缓存载入时不许上传，免得把「无图版」覆盖到云端 */
+    if (App.store && App.store.bootInfo && App.store.bootInfo().imgPending) return;
     if (!cfg.auto || !configured() || !linked()) return;
     if (timers.change) clearTimeout(timers.change);
     timers.change = setTimeout(function () {
@@ -461,6 +463,10 @@
     opts = opts || {};
     if (!configured() || !linked()) return Promise.resolve({ action: 'skip' });
     if (running) return Promise.resolve({ action: 'busy' });
+    /* 同上：本机图片未就绪时先不动云端 */
+    if (App.store && App.store.bootInfo && App.store.bootInfo().imgPending) {
+      return Promise.resolve({ action: 'waiting-images' });
+    }
     if (!navigator.onLine) { emit(); return Promise.resolve({ action: 'offline' }); }
     running = true; emit();
 

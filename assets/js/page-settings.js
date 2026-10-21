@@ -14,8 +14,6 @@
       var ai = db.settings.ai || (db.settings.ai = {});
 
       var size = App.store.size();
-      var limit = 5 * 1024 * 1024;
-      var pct = Math.min(100, size / limit * 100);
 
       var html = '';
 
@@ -74,10 +72,29 @@
       html += '</div>';
 
       /* 数据 */
-      html += '<div class="card mt16"><div class="card-head"><h3><span class="card-title-dot"></span>本地数据</h3>' +
-        '<span class="sub">' + U.fmtSize(size) + ' / 约 5 MB</span></div>';
-      html += '<div class="storage-bar mb12"><div style="width:' + pct + '%"></div></div>';
-      html += '<div class="row wrap" style="gap:8px">' +
+      var imgSt = App.store.imgStat();
+      var slim = App.store.slimInfo();
+      var lsBytes = App.store.lsSize ? App.store.lsSize() : size;
+      var limit = 5 * 1024 * 1024;
+      var pct = Math.min(100, lsBytes / limit * 100);
+      var tight = pct >= 88;
+
+      html += '<div class="card mt16" id="storageCard"><div class="card-head"><h3><span class="card-title-dot"></span>本地数据</h3>' +
+        '<span class="badge ' + (tight ? 'rose' : pct >= 65 ? 'amber' : 'gray') + '">' + U.fmtSize(lsBytes) + ' / 约 5 MB</span></div>';
+      html += '<div class="storage-bar mb12' + (tight ? ' over' : '') + '"><div style="width:' + Math.max(2, pct) + '%"></div></div>';
+      html += '<div class="tiny muted">数据总量 ' + U.fmtSize(size) + '，其中试卷截图 ' + imgSt.imgs + ' 张 · ' + U.fmtSize(imgSt.bytes) + '</div>';
+
+      if (slim) {
+        html += '<div class="slim-note mt12">' +
+          '<b>本地空间已满，已自动改存本机缓存。</b>' +
+          '<span>' + (slim.imgs || 0) + ' 张截图（约 ' + U.fmtSize(Math.round((slim.bytes || 0) * 0.75)) + '）放在浏览器的 IndexedDB 里，' +
+          '刷新页面会自动接回来，截图照常能看、能同步；文字数据一条没少。' +
+          '真正占地方的是图片，建议点下面的「图片瘦身」。</span></div>';
+      }
+
+      html += '<div class="row wrap mt12" style="gap:8px">' +
+        '<button class="btn primary" id="shrinkImages">图片瘦身' + (imgSt.imgs ? '（' + imgSt.imgs + ' 张）' : '') + '</button>' +
+        '<button class="btn" id="manageImages">管理截图</button>' +
         '<button class="btn" id="exportData">↓ 导出备份 (JSON)</button>' +
         '<button class="btn" id="importData">↑ 导入备份</button>' +
         '<button class="btn danger" id="clearData">清空全部数据</button>' +
@@ -213,8 +230,122 @@
           App.ui.toast('示例数据已载入', 'ok');
         });
       };
+
+      /* ---------- 图片瘦身 ---------- */
+      el.querySelector('#shrinkImages').onclick = function () {
+        var st = App.store.imgStat();
+        if (!st.imgs) { App.ui.toast('没有可压缩的截图', ''); return; }
+        App.ui.confirm('把 ' + st.imgs + ' 张截图重新压到 1000px / 高质量 JPEG，体积通常能省一半以上。<br>' +
+          '<span class="tiny muted">只影响清晰度，不改动任何文字数据；建议先导出备份。压缩后无法还原。</span>',
+          { okLabel: '开始瘦身' }).then(function (ok) {
+            if (!ok) return;
+            var btn = el.querySelector('#shrinkImages');
+            btn.disabled = true; btn.textContent = '压缩中…';
+            App.files.shrinkAll(db, { maxSize: 1000, quality: 0.6 }).then(function (r) {
+              var saved = Math.max(0, r.before - r.after);
+              App.store.save();
+              App.render();
+              App.ui.toast('已压缩 ' + r.n + ' 张，省下约 ' + U.fmtSize(Math.round(saved * 0.75)), 'ok', 4200);
+            })['catch'](function (e) {
+              btn.disabled = false; btn.textContent = '图片瘦身';
+              App.ui.toast('压缩失败：' + (e && e.message ? e.message : e), 'err', 4200);
+            });
+          });
+      };
+
+      /* ---------- 管理截图 ---------- */
+      el.querySelector('#manageImages').onclick = function () { openImageManager(); };
     }
   };
+
+  /* 截图清单弹窗：按「试卷分析 / 课堂记录」分组，可逐组清空 */
+  function openImageManager() {
+    var db = App.store.db, U = App.util;
+    var groups = [];
+
+    function collect(list, kind) {
+      (list || []).forEach(function (it) {
+        var imgs = (it.images || []).filter(function (v) { return typeof v === 'string' && v.slice(0, 11) === 'data:image/'; });
+        if (!imgs.length) return;
+        var st = U.stu(it.studentId);
+        var bytes = imgs.reduce(function (a, v) { return a + v.length * 0.75; }, 0);
+        groups.push({
+          owner: it,
+          kind: kind,
+          title: (kind === 'paper' ? '试卷分析' : '课堂记录') + ' · ' + ((st && st.en) || '未选学生'),
+          sub: (it.date || '') + (it.text ? ' · ' + String(it.text).slice(0, 16) : ''),
+          imgs: imgs, bytes: bytes
+        });
+      });
+    }
+    collect(db.papers, 'paper');
+    collect(db.records, 'record');
+
+    var total = groups.reduce(function (a, g) { return a + g.bytes; }, 0);
+    var n = groups.reduce(function (a, g) { return a + g.imgs.length; }, 0);
+
+    var body = '';
+    if (!groups.length) {
+      body = '<div class="empty">还没有保存任何截图</div>';
+    } else {
+      body = '<div class="tiny muted mb12">共 ' + n + ' 张 · ' + U.fmtSize(Math.round(total)) +
+        '，点缩略图可放大，右侧「清空」只删这一组。</div>';
+      body += '<div class="img-mgr">' + groups.map(function (g, gi) {
+        return '<div class="img-mgr-row">' +
+          '<div class="img-mgr-thumbs">' + g.imgs.slice(0, 3).map(function (src) {
+            return '<img src="' + src + '">';
+          }).join('') + (g.imgs.length > 3 ? '<span class="more">+' + (g.imgs.length - 3) + '</span>' : '') + '</div>' +
+          '<div class="img-mgr-meta"><strong>' + U.esc(g.title) + '</strong>' +
+          '<span>' + U.esc(g.sub) + '</span>' +
+          '<span class="tiny muted">' + g.imgs.length + ' 张 · ' + U.fmtSize(Math.round(g.bytes)) + '</span></div>' +
+          '<button class="btn sm" data-clear="' + gi + '">清空</button>' +
+          '</div>';
+      }).join('') + '</div>';
+    }
+
+    App.ui.modal({
+      title: '管理截图',
+      width: 620,
+      body: body,
+      footer: groups.length ? [
+        { label: '关闭', onClick: function (close) { close(); } },
+        {
+          label: '清空全部截图', cls: 'danger', onClick: function (close) {
+            App.ui.confirm('删除<b>全部 ' + n + ' 张截图</b>（约 ' + U.fmtSize(Math.round(total)) + '）？<br>' +
+              '<span class="tiny muted">文字与成绩不受影响，但截图删了不可恢复，建议先导出备份。</span>',
+              { danger: true, okLabel: '全部删除' }).then(function (ok) {
+                if (!ok) return;
+                [db.papers, db.records].forEach(function (list) {
+                  (list || []).forEach(function (it) { if (it.images) it.images = []; });
+                });
+                App.store.save();
+                close(); App.render();
+                App.ui.toast('已清空全部截图', 'ok');
+              });
+          }
+        }
+      ] : [{ label: '关闭', onClick: function (close) { close(); } }],
+      onMount: function (root, close) {
+        root.querySelectorAll('[data-clear]').forEach(function (b) {
+          b.onclick = function () {
+            var g = groups[parseInt(b.dataset.clear, 10)];
+            App.ui.confirm('删除这组 ' + g.imgs.length + ' 张截图？<br><span class="tiny muted">文字内容不受影响。</span>',
+              { danger: true, okLabel: '删除' }).then(function (ok) {
+                if (!ok) return;
+                g.owner.images = [];
+                App.store.save();
+                close();
+                setTimeout(openImageManager, 180);
+                App.ui.toast('已删除', 'ok');
+              });
+          };
+        });
+        root.querySelectorAll('.img-mgr-thumbs img').forEach(function (im) {
+          im.onclick = function () { App.ui.lightbox(im.src); };
+        });
+      }
+    });
+  }
   /* ==========================================================
      云端同步卡片
      ========================================================== */

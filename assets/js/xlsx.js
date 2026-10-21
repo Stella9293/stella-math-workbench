@@ -222,6 +222,74 @@
       });
     },
 
+    /* 把一张 dataURL 重编码得更小（用于「图片瘦身」） */
+    shrinkOne: function (dataURL, maxSize, quality) {
+      maxSize = maxSize || 1000;
+      quality = quality || 0.6;
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = function () {
+          try {
+            var w = img.width, h = img.height;
+            var scale = Math.min(1, maxSize / Math.max(w, h));
+            var cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.round(w * scale));
+            cv.height = Math.max(1, Math.round(h * scale));
+            var ctx = cv.getContext('2d');
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, cv.width, cv.height);
+            ctx.drawImage(img, 0, 0, cv.width, cv.height);
+            var out = cv.toDataURL('image/jpeg', quality);
+            resolve(out.length < dataURL.length ? out : dataURL);
+          } catch (e) { resolve(dataURL); }
+        };
+        img.onerror = function () { resolve(dataURL); };
+        img.src = dataURL;
+      });
+    },
+
+    /* 收集 db 里所有图片的「位置引用」，方便统计与批量处理 */
+    imageRefs: function (db) {
+      var out = [];
+      function push(arr, owner, label) {
+        if (!Array.isArray(arr)) return;
+        arr.forEach(function (v, i) {
+          if (typeof v === 'string' && v.slice(0, 11) === 'data:image/') {
+            out.push({ arr: arr, i: i, owner: owner, label: label, size: v.length });
+          }
+        });
+      }
+      (db.papers || []).forEach(function (p) {
+        var st = App.util.stu(p.studentId);
+        push(p.images, p, '试卷分析 · ' + ((st && st.en) || '未选学生') + (p.date ? ' · ' + p.date : ''));
+      });
+      (db.records || []).forEach(function (r) {
+        var st = App.util.stu(r.studentId);
+        push(r.images, r, '课堂记录 · ' + ((st && st.en) || '未选学生') + (r.date ? ' · ' + r.date : ''));
+      });
+      return out;
+    },
+
+    /* 批量瘦身：返回 { n, before, after }（字符数） */
+    shrinkAll: function (db, opt) {
+      opt = opt || {};
+      var refs = files.imageRefs(db);
+      var before = 0;
+      refs.forEach(function (r) { before += r.size; });
+      if (!refs.length) return Promise.resolve({ n: 0, before: 0, after: 0 });
+      var after = 0;
+      var chain = Promise.resolve();
+      refs.forEach(function (r) {
+        chain = chain.then(function () {
+          return files.shrinkOne(r.arr[r.i], opt.maxSize || 1000, opt.quality || 0.6).then(function (out) {
+            r.arr[r.i] = out;
+            after += out.length;
+          });
+        });
+      });
+      return chain.then(function () { return { n: refs.length, before: before, after: after }; });
+    },
+
     downloadCSV: function (filename, rows) {
       var lines = rows.map(function (r) {
         return r.map(function (c) {

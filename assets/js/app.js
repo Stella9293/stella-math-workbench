@@ -69,6 +69,20 @@
   });
 
   document.addEventListener('DOMContentLoaded', function () {
+    /* 本地够放时直出；localStorage 只存了「无图版」时，先把 IndexedDB 里的图片接回来再渲染 */
+    var started = false;
+    function boot() {
+      if (started) return;
+      started = true;
+      start();
+    }
+    var hp = App.store.hydrate ? App.store.hydrate() : Promise.resolve(false);
+    var guard = setTimeout(boot, 900);            // IndexedDB 卡住也不至于白屏
+    hp.then(function () { clearTimeout(guard); boot(); })
+      ['catch'](function () { clearTimeout(guard); boot(); });
+  });
+
+  function start() {
     var db = App.store.db;
     if (!db.meta.currentClassId && db.classes[0]) {
       db.meta.currentClassId = db.classes[0].id;
@@ -119,5 +133,5 @@
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden' && App.store.flush) App.store.flush();
     });
-  });
+  }
 })();
