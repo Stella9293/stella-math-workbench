@@ -168,5 +168,67 @@
     return svg;
   }
 
-  App.charts = { bars: bars, grouped: grouped, line: line };
+  /* 多系列折线（每人一条），空值断线；focus 指定系列高亮并显示数值 */
+  function multiLine(opt) {
+    var labels = opt.labels || [], series = opt.series || [];
+    var W = 680, H = opt.height || 250;
+    var pl = 40, pr = 18, pt = 24, pb = 36;
+    var pw = W - pl - pr, ph = H - pt - pb;
+    var max = opt.max != null ? opt.max : 100;
+    var min = opt.min != null ? opt.min : 0;
+    var focus = opt.focus == null ? null : opt.focus;
+    var span = (max - min) || 1;
+    function X(i) { return labels.length <= 1 ? pl + pw / 2 : pl + pw * i / (labels.length - 1); }
+    function Y(v) { return pt + ph - ((v - min) / span) * ph; }
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet" style="display:block">';
+
+    for (var g = 0; g <= 4; g++) {
+      var tv = max - span * g / 4;
+      var gy = pt + ph * g / 4;
+      svg += '<line x1="' + pl + '" y1="' + gy + '" x2="' + (W - pr) + '" y2="' + gy + '" stroke="' + GRID + '" stroke-width="1"/>';
+      svg += '<text x="' + (pl - 7) + '" y="' + (gy + 3.5) + '" text-anchor="end" font-size="9.5" fill="' + MUTED + '">' + fmt(tv) + '</text>';
+    }
+
+    /* 选中测验的竖向参考线 */
+    if (opt.mark != null && opt.mark >= 0 && labels.length > 1) {
+      var mx = X(opt.mark);
+      svg += '<line x1="' + mx + '" y1="' + pt + '" x2="' + mx + '" y2="' + (pt + ph) + '" stroke="' + (opt.markColor || '#cbbef8') + '" stroke-width="1.4" stroke-dasharray="4 4"/>';
+    }
+
+    var step = Math.max(1, Math.ceil(labels.length / 7));
+    labels.forEach(function (lb, i) {
+      if (i % step !== 0 && i !== labels.length - 1) return;
+      svg += '<text x="' + X(i) + '" y="' + (H - 12) + '" text-anchor="middle" font-size="9.5" fill="' + MUTED + '">' + String(lb).slice(0, 10) + '</text>';
+    });
+
+    series.forEach(function (s, si) {
+      var dim = focus != null && focus !== si;
+      var op = dim ? 0.16 : (focus === si ? 1 : 0.72);
+      var stroke = s.color || '#8b7cf6';
+      var d = '', started = false, pts = [];
+      s.values.forEach(function (v, i) {
+        if (v == null) { started = false; return; }
+        d += (started ? 'L' : 'M') + X(i) + ' ' + Y(v) + ' ';
+        started = true;
+        pts.push([i, X(i), Y(v), v]);
+      });
+      if (!d) return;
+      svg += '<path d="' + d.trim() + '" fill="none" stroke="' + stroke + '" stroke-width="' + (focus === si ? 2.8 : dim ? 1.2 : 1.9) + '" stroke-linejoin="round" stroke-linecap="round" opacity="' + op + '"/>';
+      var showDot = focus === si || (!dim && series.length <= 10);
+      pts.forEach(function (p) {
+        if (!showDot) return;
+        var tip = (s.name ? s.name + ' · ' : '') + (labels[p[0]] || '') + ' · ' + fmt(p[3]) + '%';
+        svg += '<circle cx="' + p[1] + '" cy="' + p[2] + '" r="' + (focus === si ? 4 : 2.8) + '" fill="#fff" stroke="' + stroke + '" stroke-width="' + (focus === si ? 2.2 : 1.6) + '" opacity="' + (dim ? 0.2 : 1) + '"><title>' + tip.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</title></circle>';
+        if (focus === si) {
+          var ty = p[2] - 9 < pt + 8 ? p[2] + 15 : p[2] - 9;
+          svg += '<text x="' + p[1] + '" y="' + ty + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + INK + '">' + fmt(p[3]) + '</text>';
+        }
+      });
+    });
+
+    svg += '</svg>';
+    return svg;
+  }
+
+  App.charts = { bars: bars, grouped: grouped, line: line, multiLine: multiLine };
 })();

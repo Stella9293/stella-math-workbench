@@ -303,6 +303,7 @@
 
       /* ============ 测验成绩 ============ */
       if (st.tab === 'scores') {
+        var trendPaint = null;
         var exams = U.examList(st.classId);
         if (!st.examId || !exams.some(function (e) { return e.id === st.examId; })) {
           st.examId = exams.length ? exams[exams.length - 1].id : null;
@@ -364,23 +365,103 @@
           html += '</div></div>';
           html += '</div>';
 
-          /* 班级对比 */
-          var comp = db.classes.map(function (c) {
-            var le = U.latestExam(c.id);
-            var avg = le ? U.examAvg(le) : null;
-            return { name: c.name.split(' · ')[0], value: avg == null || !le ? 0 : U.round1(avg / le.full * 100) };
+          /* 学生成绩走势：每次满分不同，统一换算成得分率（%）后按学生连线 */
+          var PAL = ['#8b7cf6', '#e8779b', '#e8a44c', '#4fb79b', '#6f9ff0', '#c077d8',
+            '#7fbf5f', '#e2725b', '#45a4c4', '#b08a5a', '#9b7fe0', '#d05a8a',
+            '#2f7f8f', '#b4553f'];
+          var trendExams = exams.filter(function (e) {
+            return Object.keys(e.scores || {}).some(function (k) { return !isNaN(parseFloat(e.scores[k])); });
           });
-          html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>班级对比（最近一次测验得分率）</h3>' +
-            '<span class="sub">归一化后可直接比较不同满分</span></div>' +
-            App.charts.bars({
-              labels: comp.map(function (c) { return c.name; }), values: comp.map(function (c) { return c.value; }),
-              max: 100, color: U.clsColor(st.classId), colors: db.classes.map(function (c) { return c.color; }),
-              gid: 'cmp', height: 210, suffix: '%'
-            }) + '</div>';
+          var trendTotal = trendExams.length;
+          trendExams = trendExams.slice(-12);
+          var trendSeries = [];
+          U.studentsOf(st.classId).forEach(function (s) {
+            var vals = trendExams.map(function (e) {
+              var v = e.scores[s.id];
+              if (v == null || v === '') return null;
+              var n = parseFloat(v);
+              if (isNaN(n)) return null;
+              return U.round1(n / (e.full || 100) * 100);
+            });
+            var got = vals.filter(function (x) { return x != null; });
+            if (!got.length) return;
+            trendSeries.push({
+              id: s.id, name: U.displayName(s), color: PAL[trendSeries.length % PAL.length],
+              values: vals, last: got[got.length - 1],
+              delta: got.length > 1 ? U.round1(got[got.length - 1] - got[got.length - 2]) : null
+            });
+          });
+          var trendLabels = trendExams.map(function (e) {
+            var d = String(e.date || '');
+            return d.length >= 10 ? d.slice(5).replace('-', '/') : e.name;
+          });
+          var markIdx = trendExams.findIndex(function (e) { return e.id === st.examId; });
+          if (!st.trendFocus || !trendSeries.some(function (s) { return s.id === st.trendFocus; })) st.trendFocus = null;
+          function focusIdx() {
+            if (!st.trendFocus) return null;
+            var k = trendSeries.findIndex(function (s) { return s.id === st.trendFocus; });
+            return k < 0 ? null : k;
+          }
+          function trendChartHTML() {
+            return App.charts.multiLine({
+              labels: trendLabels,
+              series: trendSeries.map(function (s) { return { name: s.name, color: s.color, values: s.values }; }),
+              focus: focusIdx(), mark: markIdx >= 0 ? markIdx : null,
+              markColor: U.clsColor(st.classId), height: 268
+            });
+          }
+          function trendLegendHTML() {
+            var fi = focusIdx();
+            var h = '<div class="trend-legend">' +
+              '<button class="chip ' + (fi == null ? 'active' : '') + '" data-tfocus="">全部 ' + trendSeries.length + ' 人</button>';
+            trendSeries.forEach(function (s) {
+              var on = fi != null && trendSeries[fi] === s;
+              h += '<button class="chip ' + (on ? 'active' : '') + '" data-tfocus="' + s.id + '">' +
+                '<span class="dot" style="background:' + s.color + '"></span>' + esc(s.name) +
+                '<b>' + (s.last == null ? '—' : s.last + '%') + '</b>' +
+                (s.delta == null || !s.delta ? '' : '<i class="' + (s.delta > 0 ? 'up' : 'down') + '">' +
+                  (s.delta > 0 ? '↑' : '↓') + U.round1(Math.abs(s.delta)) + '</i>') +
+                '</button>';
+            });
+            return h + '</div>';
+          }
+
+          html += '<div class="card" id="trendCard"><div class="card-head">' +
+            '<h3><span class="card-title-dot"></span>学生成绩走势 · 得分率</h3>' +
+            '<span class="sub">共 ' + trendTotal + ' 次测验' +
+            (trendTotal > trendExams.length ? ' · 走势显示最近 ' + trendExams.length + ' 次' : '') +
+            ' · 已按各次满分换算成 %</span></div>' +
+            '<div class="tiny muted mb8">每次满分不同，统一换算成得分率再连线，可直接横向比较；点下方姓名可只看该生的具体百分比。</div>';
+          if (!trendExams.length || !trendSeries.length) {
+            html += '<div class="empty">还没有可用的成绩，先在上方「录入成绩」或导入 Excel 成绩表</div>';
+          } else {
+            if (trendExams.length === 1) {
+              html += '<div class="tiny" style="color:var(--amber);margin-bottom:6px">目前只有 1 次测验成绩，录完第 2 次就能看到变化趋势。</div>';
+            }
+            html += '<div id="trendChart">' + trendChartHTML() + '</div>' +
+              '<div id="trendLegendWrap">' + trendLegendHTML() + '</div>' +
+              '<div class="trend-refs">' + trendExams.map(function (e, i) {
+                return '<span' + (e.id === st.examId ? ' class="on"' : '') + '><b>' + (i + 1) + '</b> ' +
+                  (e.date ? U.dateLabel(e.date) + ' · ' : '') + esc(e.name) + ' · 满分 ' + e.full + '</span>';
+              }).join('') + '</div>';
+          }
+          html += '</div>';
+
+          /* 点姓名侧重某位学生：只重绘图表与图例，不整页刷新 */
+          trendPaint = function () {
+            var c = el.querySelector('#trendChart');
+            var l = el.querySelector('#trendLegendWrap');
+            if (c) c.innerHTML = trendChartHTML();
+            if (l) l.innerHTML = trendLegendHTML();
+            el.querySelectorAll('[data-tfocus]').forEach(function (b) {
+              b.onclick = function () { st.trendFocus = b.dataset.tfocus || null; trendPaint(); };
+            });
+          };
         }
 
         el.innerHTML = html;
         bindCommon(el, st, db);
+        if (trendPaint) trendPaint();
 
         el.querySelectorAll('[data-exam]').forEach(function (tr) {
           tr.onclick = function (e) {
