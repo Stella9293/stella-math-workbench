@@ -191,7 +191,19 @@ git push
 
 用 GitHub Desktop 的话是三步：左下角 **Summary** 填一句说明 → **Commit to main** → 顶部 **Push origin**。
 
-推送后等 1 分钟左右，浏览器 **Cmd + Shift + R** 强制刷新（Pages 有 CDN 缓存，普通刷新可能还是旧文件）。
+推送后要过**两道延迟**才会在网址上看到新版，这是 GitHub Pages 的机制，不是推失败：
+
+| 环节 | 耗时 | 说明 |
+| --- | --- | --- |
+| Pages 构建 | **1 ~ 15 分钟**（实测过 14 分钟） | 仓库 **Actions** 页能看到 `pages build and deployment` 跑完才生效，排队时会更久 |
+| 浏览器 / CDN 缓存 | 最多 **10 分钟** | Pages 给所有文件发 `Cache-Control: max-age=600`，HTML 和 js 各自缓存，所以会出现「index.html 像更新了、页面行为还是旧的」 |
+
+判断到底卡在哪一步：开 **无痕窗口**（Cmd + Shift + N）打开网址。
+
+- 无痕窗口里是新的 → 是浏览器缓存，**Cmd + Shift + R** 硬刷新即可；
+- 无痕窗口里还是旧的 → Pages 还没构建完，去仓库 **Actions** 看最新那条是否变绿，别急着重推。
+
+要确认线上文件是不是最新，可以开 F12 → Network → 点那个 js → 看 `last-modified` 时间是否等于你 push 的时间。
 
 ### 几点要知道的
 
@@ -213,7 +225,8 @@ git push
 | 密码忘了 | 工作台没有「找回密码」入口。到 Supabase → **Authentication → Users**，找到那个邮箱点重置密码。注意：**别新建一个用户来代替它**，云端数据是按 user_id 隔离的，新用户看到的是一份空库 |
 | 关掉浏览器再打开数据没了 | 到「设置 → 本地数据」看大小是否为 0；若 localStorage 被清，重开时会自动从 IndexedDB 恢复 |
 | Pages 打开是 404 | ① Branch 是否 `main`、目录是否 `/ (root)`；② `index.html` 是否在仓库根目录；③ 刚 Save 要等 1~3 分钟 |
-| Pages 推送后页面没变 | 强制刷新 **Cmd + Shift + R**；再看仓库 **Actions** 里 pages-build-deployment 是否跑完 |
+| Pages 推送后页面没变 | 两道延迟：Pages 构建 1~15 分钟 + 浏览器缓存 10 分钟（见「步骤 5」）。先开**无痕窗口**判断：无痕里是新版就只是本机缓存，**Cmd + Shift + R**；无痕里也旧就去仓库 **Actions** 看 `pages-build-deployment` 是否跑完 |
+| 感觉「只有 index.html 更新了」、js 没变 | `Cache-Control: max-age=600` 对每个文件单独生效，HTML 与 assets 是分开缓存的。**不要**因为这样就反复重推；开无痕窗口或硬刷新即可。核对办法：F12 → Network → 点 js → 看 `last-modified` 是否等于 push 时间 |
 | 网址打开后数据是空的 | 正常：`https://` 和 `file://` 是两个源。到设置里登录一次云端账号就会自动拉取 |
 | 免费额度够用吗 | Supabase Free：数据库 **500 MB**、带宽 **5 GB/月**、1 周不访问会自动暂停（到控制台点 Restore 恢复，数据不丢）。快照表是**一个账号一行**，同步多少次都只占一份。真正先满的是**本机 localStorage 5 MB**——一张 1400px 试卷截图约 289 KB，十来张就到顶；但现在写满会自动把截图转到 IndexedDB，不再卡住保存。自动同步已改成「先查版本号（67 字节）再决定要不要下载」，所以带宽不会因为挂着页面被烧掉 |
 | 首页大数字不是最近的考试 | 设计如此：大数字只算**假期**节点，考试放在右侧「接下来的节点」。想让某个节点算假期，名字里带上「假 / 节」等字即可（名称决定分类） |
