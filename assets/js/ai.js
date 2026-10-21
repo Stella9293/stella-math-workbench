@@ -306,18 +306,26 @@
     var s = ctx.student;
     var items = ctx.items || [];
     if (!items.length) return '暂无足够的成绩数据，先记录几次测验后再生成综合评语。';
-    var scores = items.filter(function (i) { return i.score != null; });
-    var avg = scores.length ? U.round1(U.avg(scores.map(function (i) { return i.score; }))) : null;
-    var first = scores[0], last = scores[scores.length - 1];
+    /* 每次满分不同，统一换算成得分率（%）再比较趋势 */
+    var pcts = items.map(function (i) {
+      if (i.score == null) return null;
+      return i.exam.full ? Math.round(i.score / i.exam.full * 1000) / 10 : U.round1(i.score);
+    }).filter(function (v) { return v != null; });
+    var avgP = pcts.length ? U.round1(U.avg(pcts)) : null;
     var trend = '保持平稳';
-    if (first && last) {
-      var d = last.score - first.score;
-      trend = d > 2 ? '呈上升趋势（+' + U.round1(d) + ' 分）' : d < -2 ? '有所回落（' + U.round1(d) + ' 分）' : '基本稳定';
+    if (pcts.length > 1) {
+      var d = pcts[pcts.length - 1] - pcts[0];
+      trend = d > 2 ? '呈上升趋势（+' + U.round1(d) + ' 个百分点）'
+        : d < -2 ? '有所回落（' + U.round1(d) + ' 个百分点）' : '基本稳定';
     }
-    var txt = (s ? s.en : '该同学') + ' 在本阶段共完成 ' + items.length + ' 次测验';
-    if (avg != null) txt += '，平均分 ' + avg;
+    var last = items.filter(function (i) { return i.score != null; }).pop();
+    var txt = (s ? s.en : '该同学') + ' 在本阶段共完成 ' + pcts.length + ' 次测验';
+    if (avgP != null) txt += '，平均得分率 ' + avgP + '%';
     txt += '，成绩' + trend + '。';
-    if (last) txt += '最近一次《' + last.exam.name + '》得分 ' + last.score + '/' + last.exam.full + '。';
+    if (last) {
+      txt += '最近一次《' + last.exam.name + '》得分 ' + last.score + '/' + last.exam.full +
+        (last.exam.full ? '（' + Math.round(last.score / last.exam.full * 1000) / 10 + '%）' : '') + '。';
+    }
     var weak = {};
     (ctx.papers || []).forEach(function (p) {
       (p.tags || []).forEach(function (t) { weak[t] = (weak[t] || 0) + 1; });
@@ -328,8 +336,10 @@
       var low = ctx.kb.slice(0, 3);
       txt += '逐题知识点统计显示：' + low.map(function (o) { return o.topic + ' 正确率 ' + o.rate + '%'; }).join('、') + '。';
     }
-    txt += '课堂参与度方面，' + (ctx.classNote || '整体表现积极，能跟上课堂节奏') + '。';
-    if (ctx.homeNote) txt += '作业情况：' + ctx.homeNote + '。';
+    function trimEnd(s) { return String(s || '').replace(/[\s。；;，,、]+$/, ''); }
+    if (ctx.classNote) txt += '课堂表现方面，' + trimEnd(ctx.classNote) + '。';
+    else txt += '课堂参与度方面，整体表现积极，能跟上课堂节奏。';
+    if (ctx.homeNote) txt += '作业情况：' + trimEnd(ctx.homeNote) + '。';
     txt += '下阶段建议：1）每周固定 30 分钟专项练习薄弱知识点；2）建立错题本，每道错题写清错误原因；3）考前两周做完整套卷训练时间分配。';
     return txt;
   }

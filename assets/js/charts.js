@@ -217,11 +217,14 @@
       var showDot = focus === si || (!dim && series.length <= 10);
       pts.forEach(function (p) {
         if (!showDot) return;
-        var tip = (s.name ? s.name + ' · ' : '') + (labels[p[0]] || '') + ' · ' + fmt(p[3]) + '%';
+        var tip = s.tips && s.tips[p[0]] != null ? s.tips[p[0]]
+          : (s.name ? s.name + ' · ' : '') + (labels[p[0]] || '') + ' · ' + fmt(p[3]) + '%';
         svg += '<circle cx="' + p[1] + '" cy="' + p[2] + '" r="' + (focus === si ? 4 : 2.8) + '" fill="#fff" stroke="' + stroke + '" stroke-width="' + (focus === si ? 2.2 : 1.6) + '" opacity="' + (dim ? 0.2 : 1) + '"><title>' + tip.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</title></circle>';
         if (focus === si) {
+          var anchor = p[0] === 0 ? 'start' : p[0] === labels.length - 1 ? 'end' : 'middle';
+          var dx = anchor === 'start' ? 3 : anchor === 'end' ? -3 : 0;
           var ty = p[2] - 9 < pt + 8 ? p[2] + 15 : p[2] - 9;
-          svg += '<text x="' + p[1] + '" y="' + ty + '" text-anchor="middle" font-size="10" font-weight="600" fill="' + INK + '">' + fmt(p[3]) + '</text>';
+          svg += '<text x="' + (p[1] + dx) + '" y="' + ty + '" text-anchor="' + anchor + '" font-size="10" font-weight="600" fill="' + INK + '">' + fmt(p[3]) + '</text>';
         }
       });
     });

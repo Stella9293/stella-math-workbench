@@ -16,7 +16,7 @@
     return '薄弱知识点 · ' + system + ' 共 ' + pool.length + ' 项，已选 ' + tags.length + ' 项（可多选、可自定义）';
   }
 
-  function studentList(classId, selectedId, counts) {
+  function studentList(classId, selectedId, counts, fmt) {
     var U = App.util;
     var masked = App.store.db.meta.maskNames;
     var list = U.studentsOf(classId);
@@ -24,10 +24,11 @@
     if (!list.length) h += '<div class="empty">这个班还没有学生</div>';
     list.forEach(function (s) {
       var c = U.cls(s.classId);
+      var cv = counts && counts[s.id] != null ? (fmt ? fmt(counts[s.id]) : counts[s.id]) : null;
       h += '<div class="stu-item ' + (s.id === selectedId ? 'active' : '') + '" data-stu="' + s.id + '">' +
         '<span class="stu-avatar" style="background:' + (c ? c.color : '#bbb') + '">' + U.initial(s) + '</span>' +
         '<span class="nm"><strong>' + esc(U.displayName(s)) + '</strong><span>' + esc(masked ? U.mask(s.zh) : (s.zh || '')) + '</span></span>' +
-        (counts && counts[s.id] ? '<span class="badge gray">' + counts[s.id] + '</span>' : '') + '</div>';
+        (cv != null ? '<span class="badge gray">' + esc(String(cv)) + '</span>' : '') + '</div>';
     });
     return h + '</div>';
   }
@@ -172,7 +173,8 @@
         { id: 'class', label: '课堂表现' },
         { id: 'homework', label: '作业情况' },
         { id: 'scores', label: '测验成绩' },
-        { id: 'papers', label: '试卷分析' }
+        { id: 'papers', label: '试卷分析' },
+        { id: 'summary', label: '综合分析' }
       ];
 
       var html = '<div class="card tight mb16"><div class="row wrap between" style="gap:12px">' +
@@ -303,17 +305,15 @@
 
       /* ============ 测验成绩 ============ */
       if (st.tab === 'scores') {
-        var trendPaint = null;
         var exams = U.examList(st.classId);
         if (!st.examId || !exams.some(function (e) { return e.id === st.examId; })) {
           st.examId = exams.length ? exams[exams.length - 1].id : null;
         }
-        var exam = exams.filter(function (e) { return e.id === st.examId; })[0] || null;
 
         html += '<div class="card mb16"><div class="card-head"><h3><span class="card-title-dot"></span>测验记录</h3>' +
           '<div class="row" style="gap:8px"><button class="btn sm" id="impScore">↑ 导入 Excel 成绩</button>' +
           '<button class="btn sm primary" id="newExam">+ 新建测验</button></div></div>';
-        html += '<div class="table-wrap"><table class="tb"><thead><tr><th>测验名称</th><th>日期</th><th class="right">满分</th><th class="right">录入人数</th><th class="right">均分</th><th class="right">最高</th><th class="right">最低</th><th class="right">操作</th></tr></thead><tbody>';
+        html += '<div class="table-wrap"><table class="tb tb-x"><thead><tr><th>测验名称</th><th>日期</th><th class="right">满分</th><th class="right">录入人数</th><th class="right">均分</th><th class="right">最高</th><th class="right">最低</th><th class="right">操作</th></tr></thead><tbody>';
         if (!exams.length) html += '<tr><td colspan="8"><div class="tb-empty">还没有测验记录</div></td></tr>';
         exams.forEach(function (e) {
           var vals = Object.keys(e.scores).map(function (k) { return parseFloat(e.scores[k]); }).filter(function (x) { return !isNaN(x); });
@@ -331,137 +331,105 @@
         });
         html += '</tbody></table></div></div>';
 
-        if (exam) {
-          var pct = function (v) { return e2p(v, exam.full); };
-          var vals2 = Object.keys(exam.scores).map(function (k) { return parseFloat(exam.scores[k]); }).filter(function (x) { return !isNaN(x); });
-          var bins = [0, 0, 0, 0, 0];
-          vals2.forEach(function (v) {
-            var p = pct(v);
-            if (p < 60) bins[0]++; else if (p < 70) bins[1]++; else if (p < 80) bins[2]++; else if (p < 90) bins[3]++; else bins[4]++;
-          });
+        {
+          /* 左侧学生列表：徽标 = 最近一次得分率 */
+          var stusS = U.studentsOf(st.classId);
+          if (!st.studentId || !stusS.some(function (s) { return s.id === st.studentId; })) {
+            st.studentId = stusS[0] ? stusS[0].id : null;
+          }
+          var curS = U.stu(st.studentId);
 
-          html += '<div class="grid g-2 mb16">';
-          html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>分数段统计</h3>' +
-            '<span class="sub">' + esc(exam.name) + '</span></div>' +
-            App.charts.bars({
-              labels: ['<60%', '60-69%', '70-79%', '80-89%', '90%+'], values: bins,
-              max: Math.max(4, Math.ceil(Math.max.apply(null, bins.concat([1])) * 1.2)),
-              color: U.clsColor(st.classId), gid: 'bins' + exam.id, height: 220, suffix: ' 人'
-            }) + '</div>';
-
-          html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>个人排名</h3>' +
-            '<span class="sub">满分 ' + exam.full + '</span></div>';
-          var rows = U.studentsOf(st.classId).map(function (s) {
-            var v = exam.scores[s.id];
-            return { s: s, v: v == null || v === '' ? null : parseFloat(v) };
-          }).sort(function (a, b) { return (b.v == null ? -1 : b.v) - (a.v == null ? -1 : a.v); });
-          html += '<div style="max-height:230px;overflow:auto;padding-right:4px">';
-          rows.forEach(function (r, i) {
-            html += '<div class="rank-row"><span class="idx">' + (r.v == null ? '—' : i + 1) + '</span>' +
-              '<span style="width:104px;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(U.displayName(r.s)) + '</span>' +
-              '<span class="bar-bg"><span class="bar-fg" style="width:' + (r.v == null ? 0 : Math.max(4, r.v / exam.full * 100)) + '%"></span></span>' +
-              '<span class="score">' + (r.v == null ? '—' : r.v) + '</span></div>';
-          });
-          html += '</div></div>';
-          html += '</div>';
-
-          /* 学生成绩走势：每次满分不同，统一换算成得分率（%）后按学生连线 */
-          var PAL = ['#8b7cf6', '#e8779b', '#e8a44c', '#4fb79b', '#6f9ff0', '#c077d8',
-            '#7fbf5f', '#e2725b', '#45a4c4', '#b08a5a', '#9b7fe0', '#d05a8a',
-            '#2f7f8f', '#b4553f'];
+          /* 跨所有测验的走势：每次满分不同，统一换算成得分率（%） */
           var trendExams = exams.filter(function (e) {
             return Object.keys(e.scores || {}).some(function (k) { return !isNaN(parseFloat(e.scores[k])); });
           });
           var trendTotal = trendExams.length;
           trendExams = trendExams.slice(-12);
-          var trendSeries = [];
-          U.studentsOf(st.classId).forEach(function (s) {
-            var vals = trendExams.map(function (e) {
-              var v = e.scores[s.id];
-              if (v == null || v === '') return null;
-              var n = parseFloat(v);
-              if (isNaN(n)) return null;
-              return U.round1(n / (e.full || 100) * 100);
-            });
-            var got = vals.filter(function (x) { return x != null; });
-            if (!got.length) return;
-            trendSeries.push({
-              id: s.id, name: U.displayName(s), color: PAL[trendSeries.length % PAL.length],
-              values: vals, last: got[got.length - 1],
-              delta: got.length > 1 ? U.round1(got[got.length - 1] - got[got.length - 2]) : null
-            });
+          function pctOf(e, sid) {
+            var v = e.scores[sid];
+            if (v == null || v === '') return null;
+            var n = parseFloat(v);
+            if (isNaN(n)) return null;
+            return U.round1(n / (e.full || 100) * 100);
+          }
+          var lastPct = {};
+          stusS.forEach(function (s) {
+            for (var i = trendExams.length - 1; i >= 0; i--) {
+              var p = pctOf(trendExams[i], s.id);
+              if (p != null) { lastPct[s.id] = p; break; }
+            }
           });
           var trendLabels = trendExams.map(function (e) {
             var d = String(e.date || '');
             return d.length >= 10 ? d.slice(5).replace('-', '/') : e.name;
           });
           var markIdx = trendExams.findIndex(function (e) { return e.id === st.examId; });
-          if (!st.trendFocus || !trendSeries.some(function (s) { return s.id === st.trendFocus; })) st.trendFocus = null;
-          function focusIdx() {
-            if (!st.trendFocus) return null;
-            var k = trendSeries.findIndex(function (s) { return s.id === st.trendFocus; });
-            return k < 0 ? null : k;
-          }
-          function trendChartHTML() {
-            return App.charts.multiLine({
-              labels: trendLabels,
-              series: trendSeries.map(function (s) { return { name: s.name, color: s.color, values: s.values }; }),
-              focus: focusIdx(), mark: markIdx >= 0 ? markIdx : null,
-              markColor: U.clsColor(st.classId), height: 268
-            });
-          }
-          function trendLegendHTML() {
-            var fi = focusIdx();
-            var h = '<div class="trend-legend">' +
-              '<button class="chip ' + (fi == null ? 'active' : '') + '" data-tfocus="">全部 ' + trendSeries.length + ' 人</button>';
-            trendSeries.forEach(function (s) {
-              var on = fi != null && trendSeries[fi] === s;
-              h += '<button class="chip ' + (on ? 'active' : '') + '" data-tfocus="' + s.id + '">' +
-                '<span class="dot" style="background:' + s.color + '"></span>' + esc(s.name) +
-                '<b>' + (s.last == null ? '—' : s.last + '%') + '</b>' +
-                (s.delta == null || !s.delta ? '' : '<i class="' + (s.delta > 0 ? 'up' : 'down') + '">' +
-                  (s.delta > 0 ? '↑' : '↓') + U.round1(Math.abs(s.delta)) + '</i>') +
-                '</button>';
-            });
-            return h + '</div>';
-          }
 
-          html += '<div class="card" id="trendCard"><div class="card-head">' +
-            '<h3><span class="card-title-dot"></span>学生成绩走势 · 得分率</h3>' +
-            '<span class="sub">共 ' + trendTotal + ' 次测验' +
-            (trendTotal > trendExams.length ? ' · 走势显示最近 ' + trendExams.length + ' 次' : '') +
-            ' · 已按各次满分换算成 %</span></div>' +
-            '<div class="tiny muted mb8">每次满分不同，统一换算成得分率再连线，可直接横向比较；点下方姓名可只看该生的具体百分比。</div>';
-          if (!trendExams.length || !trendSeries.length) {
-            html += '<div class="empty">还没有可用的成绩，先在上方「录入成绩」或导入 Excel 成绩表</div>';
+          html += '<div class="grid g-1-2">';
+          html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>班级学生</h3>' +
+            '<span class="sub">' + stusS.length + ' 人</span></div>' +
+            studentList(st.classId, st.studentId, lastPct, function (v) { return U.round1(v) + '%'; }) + '</div>';
+
+          html += '<div class="card" id="trendCard">';
+          if (!curS) {
+            html += '<div class="empty">这个班还没有学生，先到「学生管理」导入名单</div>';
           } else {
-            if (trendExams.length === 1) {
-              html += '<div class="tiny" style="color:var(--amber);margin-bottom:6px">目前只有 1 次测验成绩，录完第 2 次就能看到变化趋势。</div>';
-            }
-            html += '<div id="trendChart">' + trendChartHTML() + '</div>' +
-              '<div id="trendLegendWrap">' + trendLegendHTML() + '</div>' +
-              '<div class="trend-refs">' + trendExams.map(function (e, i) {
+            var rowsS = trendExams.map(function (e) {
+              var raw = e.scores[curS.id];
+              raw = raw == null || raw === '' ? null : parseFloat(raw);
+              return { e: e, p: pctOf(e, curS.id), raw: isNaN(raw) ? null : raw };
+            });
+            var got = rowsS.filter(function (x) { return x.p != null; });
+
+            html += '<div class="card-head"><h3><span class="card-title-dot"></span>' + esc(curS.en) + ' · 成绩走势</h3>' +
+              '<span class="sub">' + (trendTotal ? '共 ' + trendTotal + ' 次测验' +
+                (trendTotal > trendExams.length ? ' · 显示最近 ' + trendExams.length + ' 次' : '') : '还没有成绩') + '</span></div>';
+
+            if (!got.length) {
+              html += '<div class="empty">这位学生还没有测验成绩，点上方表格的「录分」录入</div>';
+            } else {
+              var lastOne = got[got.length - 1];
+              var prevOne = got.length > 1 ? got[got.length - 2] : null;
+              var dif = prevOne ? U.round1(lastOne.p - prevOne.p) : null;
+              var sum = 0, hi = got[0].p, lo = got[0].p;
+              got.forEach(function (x) { sum += x.p; if (x.p > hi) hi = x.p; if (x.p < lo) lo = x.p; });
+
+              html += '<div class="trend-stats">' +
+                '<div class="ts"><span>最近一次</span><b>' + lastOne.raw + '<small>/' + lastOne.e.full + '</small></b><i>' + lastOne.p + '%</i></div>' +
+                '<div class="ts"><span>平均得分率</span><b>' + U.round1(sum / got.length) + '%</b></div>' +
+                '<div class="ts"><span>最高 / 最低</span><b>' + hi + '% / ' + lo + '%</b></div>' +
+                '<div class="ts"><span>较上次</span><b class="' + (dif > 0 ? 'up' : dif < 0 ? 'down' : '') + '">' +
+                (dif == null ? '—' : (dif > 0 ? '↑' : dif < 0 ? '↓' : '→') + U.round1(Math.abs(dif))) + '</b></div>' +
+                '</div>';
+
+              if (trendExams.length === 1) {
+                html += '<div class="tiny" style="color:var(--amber);margin-top:8px">目前只有 1 次测验成绩，录完第 2 次就能看到变化趋势。</div>';
+              }
+
+              html += '<div style="margin-top:10px">' + App.charts.multiLine({
+                labels: trendLabels,
+                series: [{
+                  name: U.displayName(curS), color: U.clsColor(st.classId), values: rowsS.map(function (x) { return x.p; }),
+                  tips: rowsS.map(function (x) {
+                    return (x.e.date ? U.dateLabel(x.e.date) + ' · ' : '') + x.e.name +
+                      (x.raw == null ? ' · 缺考' : ' · ' + x.raw + '/' + x.e.full + ' · ' + x.p + '%');
+                  })
+                }],
+                focus: 0, mark: markIdx >= 0 ? markIdx : null,
+                markColor: U.clsColor(st.classId), height: 300
+              }) + '</div>';
+
+              html += '<div class="trend-refs">' + trendExams.map(function (e, i) {
                 return '<span' + (e.id === st.examId ? ' class="on"' : '') + '><b>' + (i + 1) + '</b> ' +
                   (e.date ? U.dateLabel(e.date) + ' · ' : '') + esc(e.name) + ' · 满分 ' + e.full + '</span>';
               }).join('') + '</div>';
+            }
           }
-          html += '</div>';
-
-          /* 点姓名侧重某位学生：只重绘图表与图例，不整页刷新 */
-          trendPaint = function () {
-            var c = el.querySelector('#trendChart');
-            var l = el.querySelector('#trendLegendWrap');
-            if (c) c.innerHTML = trendChartHTML();
-            if (l) l.innerHTML = trendLegendHTML();
-            el.querySelectorAll('[data-tfocus]').forEach(function (b) {
-              b.onclick = function () { st.trendFocus = b.dataset.tfocus || null; trendPaint(); };
-            });
-          };
+          html += '</div></div>';
         }
 
         el.innerHTML = html;
         bindCommon(el, st, db);
-        if (trendPaint) trendPaint();
 
         el.querySelectorAll('[data-exam]').forEach(function (tr) {
           tr.onclick = function (e) {
@@ -515,16 +483,7 @@
         return;
       }
 
-      /* ============ 试卷分析 ============ */
-      var sub = st.paperTab || 'single';
-      html += '<div class="card mb16"><div class="row wrap between" style="gap:10px">' +
-        '<div class="tabs"><button class="tab ' + (sub === 'single' ? 'active' : '') + '" data-psub="single">单次测验分析</button>' +
-        '<button class="tab ' + (sub === 'summary' ? 'active' : '') + '" data-psub="summary">综合分析</button></div>' +
-        '<span class="tiny muted">' + (App.ai.configured()
-          ? '可直接粘贴外部结果，也可用本页 AI 诊断；两种方式的报告都能自动匹配知识点'
-          : '把外部分析结果粘进来：点「✨ 粘贴分析结果」，自动匹配薄弱知识点（可多选）') + '</span>' +
-        '</div></div>';
-
+      /* ============ 试卷分析 / 综合分析 共用：当前学生 ============ */
       var cur2 = U.stu(st.studentId);
       if (!cur2) {
         el.innerHTML = html + '<div class="card"><div class="empty">这个班还没有学生，先到「学生管理」导入名单</div></div>';
@@ -532,7 +491,8 @@
         return;
       }
 
-      if (sub === 'single') {
+      /* ============ 试卷分析（只保留单次） ============ */
+      if (st.tab === 'papers') {
         var papers = db.papers.filter(function (p) { return p.studentId === st.studentId; })
           .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
         var draft = st.paperDraft && st.paperDraft.studentId === st.studentId ? st.paperDraft : null;
@@ -1109,13 +1069,23 @@
         return;
       }
 
-      /* ---- 综合分析 ---- */
+      /* ============ 综合分析（单个学生：课堂 + 作业 + 测验 + 试卷） ============ */
+      if (st.tab === 'summary') {
+      var sumCls = U.cls(st.classId);
       var exams2 = U.examList(st.classId);
-      var myPapers = db.papers.filter(function (p) { return p.studentId === st.studentId; });
+      var myPapers = db.papers.filter(function (p) { return p.studentId === st.studentId; })
+        .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
       var summaries = db.summaries.filter(function (s) { return s.studentId === st.studentId; })
         .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
       var sd = st.summaryDraft && st.summaryDraft.studentId === st.studentId ? st.summaryDraft : null;
-      if (!sd) sd = st.summaryDraft = { studentId: st.studentId, exams: [], papers: [], text: '' };
+      if (!sd) {
+        sd = st.summaryDraft = {
+          studentId: st.studentId,
+          exams: exams2.map(function (e) { return e.id; }),
+          papers: myPapers.map(function (p) { return p.id; }),
+          text: ''
+        };
+      }
 
       /* 按所选试卷的逐题知识点汇总正确率 */
       function kbStats() {
@@ -1146,20 +1116,28 @@
       }
 
       html += '<div class="grid g-1-2">';
-      html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>汇总范围</h3>' +
+      html += '<div><div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>班级学生</h3>' +
+        '<span class="sub">' + stus.length + ' 人</span></div>' +
+        studentList(st.classId, st.studentId, null) + '</div>';
+      html += '<div class="card mt16"><div class="card-head"><h3><span class="card-title-dot"></span>汇总范围</h3>' +
         '<span class="sub">' + esc(cur2.en) + '</span></div>';
+      var nClassRec = db.records.filter(function (r) { return r.studentId === cur2.id && r.type === 'class'; }).length;
+      var nHwRec = db.records.filter(function (r) { return r.studentId === cur2.id && r.type === 'homework'; }).length;
+      html += '<div class="tiny muted mb8" style="line-height:1.8">材料：课堂记录 <b>' + nClassRec + '</b> 条 · 作业记录 <b>' + nHwRec +
+        '</b> 条 · 已选试卷分析 <b>' + sd.papers.length + '</b> 份<br>课堂与作业记录自动取最近 3 条纳入，下面可勾选测验与试卷范围。</div>';
       html += '<div class="row wrap mb8" style="gap:6px">' +
         '<button class="btn sm ghost" id="sumAll">全选</button>' +
         '<button class="btn sm ghost" id="sumNone">清空</button>' +
         '<button class="btn sm ghost" id="sumLast3">近三次</button></div>';
-      html += '<div class="tiny muted mb8">选择要纳入综合评语的测验</div>';
+      html += '<div class="tiny muted mb8">选择要纳入综合分析的测验</div>';
       if (!exams2.length) html += '<div class="empty">还没有测验成绩</div>';
       exams2.forEach(function (e) {
         var v = e.scores[cur2.id];
+        var pv = v == null || v === '' ? null : U.round1(parseFloat(v) / (e.full || 100) * 100);
         html += '<label class="row" style="gap:8px;padding:6px 4px;cursor:pointer">' +
           '<input type="checkbox" data-sx="' + e.id + '" ' + (sd.exams.indexOf(e.id) >= 0 ? 'checked' : '') + '>' +
           '<span style="flex:1;font-size:12.5px">' + esc(e.name) + '</span>' +
-          '<span class="tiny muted num">' + (v != null ? v + '/' + e.full : '—') + '</span></label>';
+          '<span class="tiny muted num">' + (pv == null ? '—' : v + '/' + e.full + ' · ' + pv + '%') + '</span></label>';
       });
       html += '<div class="divider"></div><div class="tiny muted mb8">纳入试卷分析记录</div>';
       if (!myPapers.length) html += '<div class="tiny muted">暂无</div>';
@@ -1169,7 +1147,7 @@
           '<span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + U.dateLabel(p.date) + ' · ' + esc(p.paperName || '试卷分析') + '</span>' +
           '<span class="tiny muted">' + (p.tags || []).length + ' 标签</span></label>';
       });
-      html += '<button class="btn primary block mt16" id="sumGen">汇总生成综合评语</button></div>';
+      html += '<button class="btn primary block mt16" id="sumGen">汇总生成综合分析</button></div></div>';
 
       /* ---- 知识点正确率（按所选试卷的逐题知识点） ---- */
       var kbRows = kbStats();
@@ -1177,7 +1155,7 @@
         '<span class="sub">按所选试卷的逐题知识点统计，点开看明细</span></div>';
       if (!kbRows.length) {
         html += '<div class="empty" style="padding:22px 16px">所选试卷还没有逐题知识点<br>' +
-          '<span class="tiny">到「单次测验分析 → 逐题得分」给每题标上知识点，这里就会自动统计</span></div>';
+          '<span class="tiny">到「试卷分析 → 逐题得分」给每题标上知识点，这里就会自动统计</span></div>';
       } else {
         html += '<div class="kb-list">';
         kbRows.forEach(function (o) {
@@ -1201,13 +1179,13 @@
       }
       html += '</div>';
 
-      html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>综合评语</h3>' +
+      html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>综合分析 · ' + esc(cur2.en) + '</h3>' +
         '<div class="row" style="gap:6px"><button class="btn sm" id="sumSave">保存</button>' +
         '<button class="btn sm" id="sumWord">导出 Word</button></div></div>';
-      html += '<textarea class="textarea" id="sumText" style="min-height:200px" placeholder="点击左侧「汇总生成综合评语」，会自动汇总课堂表现、作业情况、测验成绩与试卷分析"><\/textarea>';
+      html += '<textarea class="textarea" id="sumText" style="min-height:200px" placeholder="点击左侧「汇总生成综合分析」，会自动汇总课堂表现、作业情况、测验成绩与试卷分析（薄弱知识点）"><\/textarea>';
 
-      html += '<div class="divider"></div><div class="tiny muted mb8">历史综合评语（' + summaries.length + '）</div>';
-      if (!summaries.length) html += '<div class="empty">还没有保存过综合评语</div>';
+      html += '<div class="divider"></div><div class="tiny muted mb8">历史综合分析（' + summaries.length + '）</div>';
+      if (!summaries.length) html += '<div class="empty">还没有保存过综合分析</div>';
       summaries.forEach(function (s) {
         html += '<div class="note-card mb8"><div class="nc-head"><span class="badge gray">' + U.dateLabel(s.date) + '</span>' +
           '<span class="tiny muted">汇总 ' + (s.exams || []).length + ' 次测验</span><span class="spacer"></span>' +
@@ -1296,9 +1274,10 @@
         var btn = el.querySelector('#sumGen');
         btn.disabled = true; btn.textContent = '生成中…';
         var prompt = '请根据以下材料，为一位国际数学课程学生写一段 400-500 字的中文综合评语，直接输出正文，分 3 段，不要用编号列表，不要加标题。\n' +
-          '学生：' + cur2.en + '（' + cur2.zh + '），班级：' + U.clsName(st.classId) + '，课程体系：' + (clsObj ? clsObj.system : '') + '\n' +
+          '学生：' + cur2.en + '（' + cur2.zh + '），班级：' + U.clsName(st.classId) + '，课程体系：' + (sumCls ? sumCls.system : '') + '\n' +
           '【一、测验成绩】' + items.map(function (i) {
-            return i.exam.name + '(' + i.exam.date + ') ' + (i.score == null ? '缺考' : i.score + '/' + i.exam.full);
+            return i.exam.name + '(' + i.exam.date + ') ' + (i.score == null ? '缺考'
+              : i.score + '/' + i.exam.full + (i.exam.full ? '（' + U.round1(i.score / i.exam.full * 100) + '%）' : ''));
           }).join('；') + '\n' +
           '【二、课堂表现】' + (classTxt || '暂无记录') + '\n' +
           '【三、作业情况】' + (hwTxt || '暂无记录') + '\n' +
@@ -1316,15 +1295,15 @@
           '4）四类材料都要用到，若某类缺失就跳过，不要编造；5）语气专业、有温度，禁止「继续努力」「再接再厉」这类空话。';
         App.ai.chat({ prompt: prompt, temperature: 0.4, maxTokens: 2400, timeout: 180000 }).then(function (t) {
           sd.text = t; sumText.value = t;
-          btn.disabled = false; btn.textContent = '汇总生成综合评语';
-          App.ui.toast('AI 综合评语已生成', 'ok');
+          btn.disabled = false; btn.textContent = '汇总生成综合分析';
+          App.ui.toast('AI 综合分析已生成', 'ok');
         }).catch(function (e) {
           sd.text = App.ai.summaryComment({
             student: cur2, items: items, papers: ps,
             classNote: classTxt.slice(0, 200), homeNote: hwTxt.slice(0, 200), kb: kbRows2
           });
           sumText.value = sd.text;
-          btn.disabled = false; btn.textContent = '汇总生成综合评语';
+          btn.disabled = false; btn.textContent = '汇总生成综合分析';
           App.ui.toast(e.message + '（已用本地模板生成）', 'err', 4000);
         });
       };
@@ -1337,7 +1316,7 @@
           date: U.todayISO(), exams: sd.exams.slice(), papers: sd.papers.slice(), text: t
         });
         App.store.save(); st.summaryDraft = null; App.render();
-        App.ui.toast('综合评语已保存', 'ok');
+        App.ui.toast('综合分析已保存', 'ok');
       };
 
       function exportSum(text, examIds) {
@@ -1345,18 +1324,18 @@
           var e = db.exams.filter(function (x) { return x.id === id; })[0];
           return e ? '<p style="text-indent:0">· ' + esc(e.name) + '（' + e.date + '）：' + (e.scores[cur2.id] != null ? e.scores[cur2.id] + '/' + e.full : '缺考') + '</p>' : '';
         }).join('');
-        App.files.exportWord('综合评语', '<h1>学生综合评语</h1>' +
+        App.files.exportWord('综合分析', '<h1>学生综合分析</h1>' +
           '<div class="meta">' + esc(cur2.en) + '（' + esc(cur2.zh || '') + '） · ' + U.clsName(st.classId) + ' · ' + U.todayISO() + '</div>' +
           '<h2>阶段成绩</h2>' + (rows || '<p style="text-indent:0">—</p>') +
-          '<h2>综合评语</h2><p>' + esc(text).replace(/\n/g, '</p><p>') + '</p>' +
+          '<h2>综合分析</h2><p>' + esc(text).replace(/\n/g, '</p><p>') + '</p>' +
           '<div class="line"></div><p style="text-indent:0;color:#888;font-size:9.5pt">教师签名：Stella　　生成时间：' + U.todayISO() + '</p>',
-          '综合评语_' + cur2.en + '_' + U.todayISO());
+          '综合分析_' + cur2.en + '_' + U.todayISO());
         App.ui.toast('Word 已导出', 'ok');
       }
 
       el.querySelector('#sumWord').onclick = function () {
         var t = sumText.value.trim();
-        if (!t) { App.ui.toast('先生成评语', 'err'); return; }
+        if (!t) { App.ui.toast('先生成综合分析', 'err'); return; }
         exportSum(t, sd.exams);
       };
       el.querySelectorAll('[data-sum-word]').forEach(function (b) {
@@ -1371,10 +1350,10 @@
           App.store.save(); App.render();
         };
       });
+      return;
+      }
     }
   };
-
-  function e2p(v, full) { return full ? v / full * 100 : v; }
 
   function bindCommon(el, st, db) {
     var U = App.util;
@@ -1388,9 +1367,6 @@
     el.querySelectorAll('[data-tab]').forEach(function (b) {
       b.onclick = function () { st.tab = b.dataset.tab; App.render(); };
     });
-    el.querySelectorAll('[data-psub]').forEach(function (b) {
-      b.onclick = function () { st.paperTab = b.dataset.psub; App.render(); };
-    });
     el.querySelectorAll('[data-stu]').forEach(function (b) {
       b.onclick = function () {
         st.studentId = b.dataset.stu;
@@ -1400,10 +1376,10 @@
     });
   }
 
-  /* ---------------- 截图：页面级 ⌘V，只作用于「试卷分析 · 单次」草稿 ---------------- */
+  /* ---------------- 截图：页面级 ⌘V，只作用于「试卷分析」草稿 ---------------- */
   document.addEventListener('paste', function (e) {
     var st = App.state && App.state.analytics;
-    if (!st || st.tab !== 'papers' || (st.paperTab || 'single') !== 'single') return;
+    if (!st || st.tab !== 'papers') return;
     var draft = st.paperDraft;
     if (!draft || !e.clipboardData) return;
     var ae = document.activeElement;
