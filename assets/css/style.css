@@ -1013,3 +1013,15 @@ table.tb tr.selected { background: var(--p-50); }
 .side-tip .nw { white-space: nowrap; }
 .cal-note { font-size: 11.4px; color: var(--muted-2); margin-top: 5px; }
 .cal-v small { white-space: nowrap; }
+
+/* 校历节点类型徽标 + 补课日色点 */
+.cal-ev.makeup .tag { background: var(--rose); }
+.cal-kind {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; line-height: 1.6; white-space: nowrap;
+  background: var(--p-100); color: var(--p-700);
+}
+.cal-kind.holiday { background: var(--p-100); color: var(--p-700); }
+.cal-kind.exam { background: var(--amber-soft); color: #a9741f; }
+.cal-kind.term { background: var(--green-soft); color: #2f8371; }
+.cal-kind.makeup { background: var(--rose-soft); color: #b35477; }

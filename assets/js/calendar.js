@@ -37,10 +37,15 @@
 
   function kindOf(name) {
     var n = String(name || '');
+    /* 补课 / 调课：落在周末或假期里，但当天要上课 → 算工作日 */
+    if (/补课|补班|补上|调课|调休上课|正常上课/.test(n)) return 'makeup';
     if (/考试|模考|期中|期末|月考|测验|统考|测评/.test(n)) return 'exam';
     if (/开学|报到|注册|返校|军训|入学报到/.test(n)) return 'term';
     return 'holiday';
   }
+
+  var KIND_LABEL = { holiday: '假期', exam: '考试', term: '开学', makeup: '补课' };
+  function kindLabel(k) { return KIND_LABEL[k] || '假期'; }
 
   function list() {
     var c = (App.store.db && App.store.db.calendar) || [];
@@ -90,13 +95,13 @@
   }
 
   /* ✓ 工作日口径：周一～周五，且不在校历「假期」节点覆盖的日期里
-     （考试、开学这类节点照常算工作日，只扣 kind === 'holiday' 的） */
+     （考试、开学这类节点照常算工作日；「补课」节点即使在周末/假期里也算工作日） */
 
-  /* 区间内被校历假期覆盖的日期 → 假期名（只返回与 [from,to] 相交的部分） */
-  function holidayMap(fromISO, toISO) {
+  /* 某类节点在 [from,to] 内覆盖到的日期 → 节点名 */
+  function dateMap(kind, fromISO, toISO) {
     var map = {};
     list().forEach(function (e) {
-      if (!e || !e.start || e.kind !== 'holiday') return;
+      if (!e || !e.start || e.kind !== kind) return;
       var end = (e.end && e.end >= e.start) ? e.end : e.start;
       if (end < fromISO || e.start > toISO) return;
       var d = e.start < fromISO ? fromISO : e.start;
@@ -110,18 +115,27 @@
     return map;
   }
 
-  /* 区间天数构成：自然日 / 周末 / 落在工作日里的校历假期 / 工作日（含首尾） */
+  function holidayMap(fromISO, toISO) { return dateMap('holiday', fromISO, toISO); }
+
+  /* 区间天数构成：自然日 / 周末 / 校历假期 / 补课日 / 工作日（含首尾） */
   function workStats(fromISO, toISO) {
-    var out = { total: 0, weekend: 0, holiday: 0, work: 0 };
+    var out = { total: 0, weekend: 0, holiday: 0, makeup: 0, work: 0 };
     if (!fromISO || !toISO || toISO < fromISO) return out;
-    var map = holidayMap(fromISO, toISO);
+    var hol = dateMap('holiday', fromISO, toISO);
+    var mk = dateMap('makeup', fromISO, toISO);
     var d = fromISO, guard = 0;
     while (d <= toISO && guard < 1200) {
       var w = toDate(d).getDay();
       out.total++;
-      if (w === 0 || w === 6) out.weekend++;
-      else if (map[d]) out.holiday++;
-      else out.work++;
+      if (mk[d]) {                       /* 补课日优先：周末/假期里的补课照样算工作日 */
+        out.makeup++; out.work++;
+      } else if (w === 0 || w === 6) {
+        out.weekend++;
+      } else if (hol[d]) {
+        out.holiday++;
+      } else {
+        out.work++;
+      }
       d = addDays(d, 1); guard++;
     }
     return out;
@@ -283,6 +297,7 @@
     return [
       { name: '开学', start: y + '-09-01', end: '', kind: 'term' },
       { name: '国庆节', start: y + '-10-01', end: y + '-10-07', kind: 'holiday' },
+      { name: '调休补课', start: y + '-10-10', end: '', kind: 'makeup' },
       { name: '期中考试', start: y + '-11-09', end: y + '-11-13', kind: 'exam' },
       { name: '元旦', start: (y + 1) + '-01-01', end: '', kind: 'holiday' },
       { name: '期末考试', start: (y + 1) + '-01-12', end: (y + 1) + '-01-16', kind: 'exam' },
@@ -338,7 +353,7 @@
     var startD = toDate(ev.start);
     var wk = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][startD.getDay()];
     var span = ev.end ? diffDays(ev.start, ev.end) + 1 : 0;
-    var spanLabel = ev.kind === 'exam' ? '考试 ' : (ev.kind === 'term' ? '共 ' : '假期 ');
+    var spanLabel = ev.kind === 'exam' ? '考试 ' : (ev.kind === 'term' ? '共 ' : (ev.kind === 'makeup' ? '补课 ' : '假期 '));
 
     h += '<div class="cal-body"><div class="cal-main">';
     if (nxt.state === 'in') {
@@ -351,12 +366,14 @@
       /* 工作日倒计时：今天 → 假期前一天，跳过周六周日 + 校历里录入的假期 */
       var ws = workStats(today(), addDays(ev.start, -1));
       var natDays = diffDays(today(), ev.start);
+      var parts = ['含今天', '跳过周末 ' + ws.weekend + ' 天'];
+      if (ws.makeup) parts.push('补课 ' + ws.makeup + ' 天照算');
+      if (ws.holiday) parts.push('扣校历假期 ' + ws.holiday + ' 天');
       h += '<div class="cal-k">距离「' + esc(ev.name) + '」还有</div>' +
         '<div class="cal-v">' + ws.work + '<small>个工作日</small></div>' +
         '<div class="cal-d">' + (startD.getMonth() + 1) + '月' + startD.getDate() + '日 · ' + wk +
         ' · 自然日 ' + natDays + ' 天' + (span ? ' · ' + spanLabel + span + ' 天' : '') + '</div>' +
-        '<div class="cal-note">含今天 · 只算周一至周五，跳过周末 ' + ws.weekend + ' 天' +
-        (ws.holiday ? '、校历假期 ' + ws.holiday + ' 天' : '') + '</div>';
+        '<div class="cal-note">' + parts.join(' · ') + '</div>';
     }
     h += '</div><div class="cal-side"><div class="cal-side-t">接下来的节点</div>';
     var up = upcoming(4).filter(function (e) { return e.id !== ev.id; });
@@ -461,10 +478,11 @@
       }
       var h = '<div class="tiny muted mb8">识别到 ' + its.length + ' 个节点，确认后写入校历：</div>' +
         '<div class="table-wrap" style="max-height:168px;overflow:auto"><table class="tb">' +
-        '<thead><tr><th>名称</th><th>开始</th><th>结束</th></tr></thead><tbody>';
+        '<thead><tr><th>名称</th><th>开始</th><th>结束</th><th>类型</th></tr></thead><tbody>';
       its.forEach(function (it) {
         h += '<tr><td>' + U.esc(it.name) + '</td><td class="num">' + it.start + '</td>' +
-          '<td class="num">' + (it.end || '—') + '</td></tr>';
+          '<td class="num">' + (it.end || '—') + '</td>' +
+          '<td><span class="cal-kind ' + (it.kind || 'holiday') + '">' + kindLabel(it.kind) + '</span></td></tr>';
       });
       h += '</tbody></table></div>';
       prev.innerHTML = h;
@@ -491,6 +509,7 @@
         ['名称', '开始日期', '结束日期'],
         ['国庆节', y + '-10-01', y + '-10-07'],
         ['期中考试', y + '-11-09', y + '-11-13'],
+        ['调休补课', y + '-10-10', ''],
         ['寒假', (y + 1) + '-01-18', (y + 1) + '-02-20']
       ]);
     };
@@ -518,19 +537,28 @@
       '<div id="calRows"></div>' +
       '<div class="cal-add">' +
       '<div class="field-row">' +
-      '<div class="field"><label>名称</label><input class="input" id="calName" placeholder="如 寒假 / 期中考试"></div>' +
+      '<div class="field" style="flex:1.5"><label>名称</label><input class="input" id="calName" placeholder="如 寒假 / 调休补课"></div>' +
       '<div class="field"><label>开始</label><input class="input" id="calStart" type="date"></div>' +
       '<div class="field"><label>结束（选填）</label><input class="input" id="calEnd" type="date"></div>' +
+      '<div class="field" style="flex:0 0 108px"><label>类型</label><select class="select" id="calKind">' +
+      '<option value="">自动</option>' +
+      '<option value="holiday">假期</option>' +
+      '<option value="exam">考试</option>' +
+      '<option value="term">开学</option>' +
+      '<option value="makeup">补课日</option>' +
+      '</select></div>' +
       '</div>' +
-      '<div class="row" style="gap:8px"><div style="flex:1"></div>' +
-      '<button class="btn primary" id="calAdd">添加节点</button></div>' +
+      '<div class="tiny muted mt8">「补课日」那天即使在周末或假期里，也算一个工作日</div>' +
       '</div>';
 
     var m = App.ui.modal({
       title: '校历节点',
       width: 700,
       body: body,
-      footer: [{ label: '关闭', onClick: function (close) { close(); } }]
+      footer: [
+        { label: '关闭', cls: 'ghost', onClick: function (close) { close(); } },
+        { label: '添加节点', cls: 'primary', onClick: function () { addNode(); } }
+      ]
     });
     var root = m.root;
 
@@ -538,11 +566,12 @@
       var items = list();
       if (!items.length) return '<div class="tiny muted" style="padding:6px 0 10px">还没有节点，用下面的表单加一条，或点首页「导入校历」。</div>';
       var h = '<div class="table-wrap" style="max-height:300px;overflow:auto"><table class="tb">' +
-        '<thead><tr><th>名称</th><th>开始</th><th>结束</th><th></th></tr></thead><tbody>';
+        '<thead><tr><th>名称</th><th>开始</th><th>结束</th><th>类型</th><th></th></tr></thead><tbody>';
       items.forEach(function (e) {
         h += '<tr><td>' + U.esc(e.name) + '</td>' +
           '<td class="num">' + e.start + '</td>' +
           '<td class="num">' + (e.end || '—') + '</td>' +
+          '<td><span class="cal-kind ' + (e.kind || 'holiday') + '">' + kindLabel(e.kind) + '</span></td>' +
           '<td class="right"><button class="icon-btn del" data-caldel="' + e.id + '">✕</button></td></tr>';
       });
       h += '</tbody></table></div>' +
@@ -574,21 +603,23 @@
 
     repaint();
 
-    root.querySelector('#calAdd').onclick = function () {
+    function addNode() {
       var name = root.querySelector('#calName').value.trim();
       var st = root.querySelector('#calStart').value;
       var en = root.querySelector('#calEnd').value;
+      var kd = root.querySelector('#calKind').value;
       if (!name) return App.ui.toast('先填名称', 'err');
       if (!st) return App.ui.toast('先选开始日期', 'err');
       if (en && en < st) return App.ui.toast('结束日期不能早于开始日期', 'err');
-      merge([{ name: name, start: st, end: en, kind: kindOf(name) }]);
+      merge([{ name: name, start: st, end: en, kind: kd || kindOf(name) }]);
       root.querySelector('#calName').value = '';
       root.querySelector('#calStart').value = '';
       root.querySelector('#calEnd').value = '';
+      root.querySelector('#calKind').value = '';
       repaint();
       if (App.render) App.render();
       App.ui.toast('已添加', 'ok');
-    };
+    }
   }
 
   App.cal = {
@@ -606,6 +637,8 @@
     openImport: openImport,
     openManage: openManage,
     workStats: workStats,
+    kindOf: kindOf,
+    kindLabel: kindLabel,
     workdays: function (a, b) { return workStats(a, b).work; },
     holidayMap: holidayMap,
     days: diffDays
