@@ -395,7 +395,7 @@
       var strong = tip.querySelector('strong'), span = tip.querySelector('span');
       if (s.mode === 'local' || s.mode === 'setup') {
         if (strong) strong.textContent = '本地存储';
-        if (span) span.textContent = '数据只保存在这台电脑，不上传服务器';
+        if (span) span.innerHTML = '数据只存本机，不上传<span class="nw">服务器</span>';
       } else if (s.mode === 'linked') {
         if (strong) strong.textContent = '云端已同步';
         if (span) span.textContent = '同名账号的设备之间自动同步' + (s.time ? ' · ' + s.time : '');
