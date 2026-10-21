@@ -89,6 +89,44 @@
     };
   }
 
+  /* ✓ 工作日口径：周一～周五，且不在校历「假期」节点覆盖的日期里
+     （考试、开学这类节点照常算工作日，只扣 kind === 'holiday' 的） */
+
+  /* 区间内被校历假期覆盖的日期 → 假期名（只返回与 [from,to] 相交的部分） */
+  function holidayMap(fromISO, toISO) {
+    var map = {};
+    list().forEach(function (e) {
+      if (!e || !e.start || e.kind !== 'holiday') return;
+      var end = (e.end && e.end >= e.start) ? e.end : e.start;
+      if (end < fromISO || e.start > toISO) return;
+      var d = e.start < fromISO ? fromISO : e.start;
+      var stop = end > toISO ? toISO : end;
+      var guard = 0;
+      while (d <= stop && guard < 800) {
+        if (!map[d]) map[d] = e.name;
+        d = addDays(d, 1); guard++;
+      }
+    });
+    return map;
+  }
+
+  /* 区间天数构成：自然日 / 周末 / 落在工作日里的校历假期 / 工作日（含首尾） */
+  function workStats(fromISO, toISO) {
+    var out = { total: 0, weekend: 0, holiday: 0, work: 0 };
+    if (!fromISO || !toISO || toISO < fromISO) return out;
+    var map = holidayMap(fromISO, toISO);
+    var d = fromISO, guard = 0;
+    while (d <= toISO && guard < 1200) {
+      var w = toDate(d).getDay();
+      out.total++;
+      if (w === 0 || w === 6) out.weekend++;
+      else if (map[d]) out.holiday++;
+      else out.work++;
+      d = addDays(d, 1); guard++;
+    }
+    return out;
+  }
+
   /* ---------------- 解析 ---------------- */
   function normDigits(s) {
     return String(s || '')
@@ -282,7 +320,7 @@
       h += '<div class="cal-empty">' +
         '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M8 14h3M8 17h6"/></svg>' +
         '<div class="ce-t">还没有导入校历</div>' +
-        '<div class="tiny">把校历文字粘贴进来（或导入 Excel / CSV），就能算出距离最近假期的天数</div>' +
+        '<div class="tiny">把校历文字粘贴进来（或导入 Excel / CSV），就能算出距离最近假期还有多少个工作日</div>' +
         '<button class="btn primary sm mt12" data-cal="import">导入校历</button>' +
         '</div>';
       h += '</div>';
@@ -300,6 +338,7 @@
     var startD = toDate(ev.start);
     var wk = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][startD.getDay()];
     var span = ev.end ? diffDays(ev.start, ev.end) + 1 : 0;
+    var spanLabel = ev.kind === 'exam' ? '考试 ' : (ev.kind === 'term' ? '共 ' : '假期 ');
 
     h += '<div class="cal-body"><div class="cal-main">';
     if (nxt.state === 'in') {
@@ -309,10 +348,15 @@
         (ev.end ? (toDate(ev.end).getMonth() + 1) + '月' + toDate(ev.end).getDate() + '日' : '单日') +
         (span ? ' · 共 ' + span + ' 天' : '') + '</div>';
     } else {
+      /* 工作日倒计时：今天 → 假期前一天，跳过周六周日 + 校历里录入的假期 */
+      var ws = workStats(today(), addDays(ev.start, -1));
+      var natDays = diffDays(today(), ev.start);
       h += '<div class="cal-k">距离「' + esc(ev.name) + '」还有</div>' +
-        '<div class="cal-v">' + nxt.days + '<small>天</small></div>' +
+        '<div class="cal-v">' + ws.work + '<small>个工作日</small></div>' +
         '<div class="cal-d">' + (startD.getMonth() + 1) + '月' + startD.getDate() + '日 · ' + wk +
-        (span ? ' · 共 ' + span + ' 天' : '') + '</div>';
+        ' · 自然日 ' + natDays + ' 天' + (span ? ' · ' + spanLabel + span + ' 天' : '') + '</div>' +
+        '<div class="cal-note">含今天 · 只算周一至周五，跳过周末 ' + ws.weekend + ' 天' +
+        (ws.holiday ? '、校历假期 ' + ws.holiday + ' 天' : '') + '</div>';
     }
     h += '</div><div class="cal-side"><div class="cal-side-t">接下来的节点</div>';
     var up = upcoming(4).filter(function (e) { return e.id !== ev.id; });
@@ -336,7 +380,7 @@
       '<span>' + semi.pct + '%</span></div>' +
       '<div class="cal-bar"><i style="width:' + semi.pct + '%"></i></div>' +
       '<div class="cal-prog-foot">' + U.dateLabel(semi.start) + ' - ' + U.dateLabel(semi.end) +
-      ' · 还剩 ' + semi.left + ' 天' + alignBtn + '</div></div>';
+      ' · 还剩 ' + semi.left + ' 天 · 其中工作日 ' + workStats(today(), semi.end).work + ' 天' + alignBtn + '</div></div>';
 
     h += '</div>';
     return h;
@@ -561,6 +605,9 @@
     bind: bind,
     openImport: openImport,
     openManage: openManage,
+    workStats: workStats,
+    workdays: function (a, b) { return workStats(a, b).work; },
+    holidayMap: holidayMap,
     days: diffDays
   };
 })();
