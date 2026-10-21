@@ -397,6 +397,13 @@
       (isIn ? '<button class="btn ghost" id="syncOut">退出登录</button>' : '') +
       '</div>';
 
+    /* 已填地址但没登录：给一条「彻底变回仅本地」的出口，避免一直显示「未登录」 */
+    if (!isIn && S.configured()) {
+      h += '<div class="row wrap mt8" style="gap:8px">' +
+        '<button class="btn ghost" id="syncForget">清除云端配置（彻底变回「仅本地」）</button>' +
+        '<span class="tiny muted">只清这台电脑里存的地址与 key，数据不受影响</span></div>';
+    }
+
     if (isIn) {
       h += '<div class="row wrap mt8" style="gap:8px">' +
         '<button class="btn" id="syncNow">立即同步</button>' +
@@ -513,12 +520,26 @@
 
     var out = el.querySelector('#syncOut');
     if (out) out.onclick = function () {
-      App.ui.confirm('退出后本机数据仍保留，只是不再上传。<br>确定退出云端账号吗？').then(function (ok) {
+      App.ui.confirm('退出后本机数据<b>完整保留</b>，只是不再上传、也不再从云端拉取。<br>' +
+        '<span class="tiny muted">地址、key、邮箱会留着，以后填个密码就能重新登录。想彻底变回「仅本地」用下面的「清除云端配置」。</span>',
+        { okLabel: '退出登录' }).then(function (ok) {
         if (!ok) return;
         S.signOut().then(function () {
           App.render();
-          toast('已退出登录，回到仅本地模式', 'ok');
+          toast('已断开云端：数据只留在这台电脑，不再与另一台互相覆盖', 'ok', 4400);
         });
+      });
+    };
+
+    var forget = el.querySelector('#syncForget');
+    if (forget) forget.onclick = function () {
+      App.ui.confirm('会清掉这台电脑里保存的 <b>Project URL、anon key、登录邮箱</b>，界面回到「仅本地」。<br>' +
+        '<span class="tiny muted">本机数据一条不动。以后想再连云端，把地址和 key 重新填一遍即可。</span>',
+        { danger: true, okLabel: '清除配置' }).then(function (ok) {
+        if (!ok) return;
+        S.saveConfig({ url: '', key: '', email: '', auto: true });
+        App.render();
+        toast('已清除云端配置，现在是纯本地模式', 'ok');
       });
     };
 
