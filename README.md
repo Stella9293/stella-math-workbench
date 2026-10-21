@@ -193,6 +193,7 @@ git push
 | Pages 打开是 404 | ① Branch 是否 `main`、目录是否 `/ (root)`；② `index.html` 是否在仓库根目录；③ 刚 Save 要等 1~3 分钟 |
 | Pages 推送后页面没变 | 强制刷新 **Cmd + Shift + R**；再看仓库 **Actions** 里 pages-build-deployment 是否跑完 |
 | 网址打开后数据是空的 | 正常：`https://` 和 `file://` 是两个源。到设置里登录一次云端账号就会自动拉取 |
+| 免费额度够用吗 | Supabase Free：数据库 **500 MB**、带宽 **5 GB/月**、1 周不访问会自动暂停（到控制台点 Restore 恢复，数据不丢）。而且快照表是**一个账号一行**，同步多少次都只占一份：现在整库 27 KB，等于能存 1.8 万份。真正先满的是**本机 localStorage 5 MB**——一张 1400px 试卷截图约 289 KB，大约 13 张就到顶。自动同步已改成「先查版本号（67 字节）再决定要不要下载」，所以带宽不会因为挂着页面被烧掉 |
 | 首页大数字不是最近的考试 | 设计如此：大数字只算**假期**节点，考试放在右侧「接下来的节点」。想让某个节点算假期，名字里带上「假 / 节」等字即可（名称决定分类） |
 | `git push` 卡住 / `CONNECT tunnel failed` / 连不上 github.com | 网络到 GitHub 不通（国内常见）。**Pages 只是「打开更方便」，数据同步不依赖它**：把整个文件夹用 U 盘 / iCloud 拷到另一台电脑，双击 `index.html` 登录 Supabase 即可。仍想部署就给 git 挂代理：`git config --global http.proxy http://127.0.0.1:7890`（端口换成你代理软件的），取消用 `git config --global --unset http.proxy` |
 

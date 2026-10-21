@@ -223,6 +223,17 @@
   }
 
   /* ---------------- 快照读写 ---------------- */
+  /* 只取版本号（几百字节）：自动同步先拿它比对，没变化就完全不下载正文 */
+  function headRemote() {
+    return ensureToken().then(function () {
+      return req('/rest/v1/' + TABLE + '?user_id=eq.' + encodeURIComponent(cfg.userId) +
+        '&select=rev,updated_at,device&limit=1');
+    }).then(function (rows) {
+      return (rows && rows[0]) || null;
+    });
+  }
+
+  /* 取整份数据（含 data）：只有云端真的变了，或需要弹冲突选择时才调用 */
   function pullRaw() {
     return ensureToken().then(function () {
       return req('/rest/v1/' + TABLE + '?user_id=eq.' + encodeURIComponent(cfg.userId) +
@@ -453,36 +464,57 @@
     if (!navigator.onLine) { emit(); return Promise.resolve({ action: 'offline' }); }
     running = true; emit();
 
-    return pullRaw().then(function (remote) {
-      if (!remote) {                       /* 云端还没有数据 → 首次上传 */
+    /* 先只取版本号：绝大多数轮询在这一步就返回，不下载正文（整库可能有几 MB 图片） */
+    return headRemote().then(function (head) {
+      if (!head) {                         /* 云端还没有数据 → 首次上传 */
         return upload(0).then(finish);
       }
-      var remoteNewer = (remote.rev || 0) > (cfg.rev || 0);
-      if (remoteNewer) {
-        if (cfg.dirty && !opts.forcePull) {
-          conflict = remote;
-          running = false;
-          cfg.lastError = '';
-          saveCfg(); emit();
-          askConflict();
-          return { action: 'conflict' };
-        }
-        if (opts.forcePull || !cfg.dirty) {
+      var hrev = head.rev || 0;
+      var newer = hrev > (cfg.rev || 0);
+
+      /* ① 云端没更新、本机也没有待上传 → 直接结束 */
+      if (!newer && !cfg.dirty && !opts.forcePush) {
+        cfg.rev = Math.max(cfg.rev || 0, hrev);
+        cfg.remoteAt = head.updated_at || '';
+        cfg.lastSyncAt = Date.now();
+        cfg.lastError = '';
+        saveCfg();
+        return finish({ action: 'noop' });
+      }
+
+      /* ② 云端没更新、本机有改动 → 直接上传，同样不必先下载 */
+      if (!newer && !opts.forcePull) {
+        return upload(hrev).then(finish);
+      }
+
+      /* ③ 云端更新了（或要求强制拉取）→ 这时才下载整份数据 */
+      return pullRaw().then(function (remote) {
+        if (!remote) return upload(0).then(finish);
+        var remoteNewer = (remote.rev || 0) > (cfg.rev || 0);
+        if (remoteNewer) {
+          if (cfg.dirty && !opts.forcePull) {
+            conflict = remote;
+            running = false;
+            cfg.lastError = '';
+            saveCfg(); emit();
+            askConflict();
+            return { action: 'conflict' };
+          }
           applyRemote(remote);
           running = false;
           return { action: 'pull' };
         }
-      }
-      if (cfg.dirty || opts.forcePush) {
-        return upload(remote.rev || 0).then(finish);
-      }
-      cfg.rev = Math.max(cfg.rev || 0, remote.rev || 0);
-      cfg.remoteAt = remote.updated_at || '';
-      cfg.lastSyncAt = Date.now();
-      cfg.lastError = '';
-      saveCfg();
-      running = false; emit();
-      return { action: 'noop' };
+        if (cfg.dirty || opts.forcePush) {
+          return upload(remote.rev || 0).then(finish);
+        }
+        cfg.rev = Math.max(cfg.rev || 0, remote.rev || 0);
+        cfg.remoteAt = remote.updated_at || '';
+        cfg.lastSyncAt = Date.now();
+        cfg.lastError = '';
+        saveCfg();
+        running = false; emit();
+        return { action: 'noop' };
+      });
     })['catch'](function (e) {
       running = false;
       cfg.lastError = e.message || '同步失败';
