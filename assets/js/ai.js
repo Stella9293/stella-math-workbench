@@ -305,7 +305,9 @@
   function summaryComment(ctx) {
     var s = ctx.student;
     var items = ctx.items || [];
-    if (!items.length) return '暂无足够的成绩数据，先记录几次测验后再生成综合评语。';
+    var papers = ctx.papers || [];
+    var hasOther = !!(ctx.classNote || ctx.homeNote || ctx.paperNote || papers.length);
+    if (!items.length && !hasOther) return '暂无足够的材料，先录入几次测验、课堂或作业记录，再生成综合分析。';
     /* 每次满分不同，统一换算成得分率（%）再比较趋势 */
     var pcts = items.map(function (i) {
       if (i.score == null) return null;
@@ -319,24 +321,31 @@
         : d < -2 ? '有所回落（' + U.round1(d) + ' 个百分点）' : '基本稳定';
     }
     var last = items.filter(function (i) { return i.score != null; }).pop();
-    var txt = (s ? s.en : '该同学') + ' 在本阶段共完成 ' + pcts.length + ' 次测验';
-    if (avgP != null) txt += '，平均得分率 ' + avgP + '%';
-    txt += '，成绩' + trend + '。';
-    if (last) {
-      txt += '最近一次《' + last.exam.name + '》得分 ' + last.score + '/' + last.exam.full +
-        (last.exam.full ? '（' + Math.round(last.score / last.exam.full * 1000) / 10 + '%）' : '') + '。';
+    var name = s ? s.en : '该同学';
+    var txt = '';
+    if (pcts.length) {
+      txt = name + ' 在本阶段共完成 ' + pcts.length + ' 次测验';
+      if (avgP != null) txt += '，平均得分率 ' + avgP + '%';
+      txt += '，成绩' + trend + '。';
+      if (last) {
+        txt += '最近一次《' + last.exam.name + '》得分 ' + last.score + '/' + last.exam.full +
+          (last.exam.full ? '（' + Math.round(last.score / last.exam.full * 1000) / 10 + '%）' : '') + '。';
+      }
+    } else {
+      txt = name + ' 本阶段还没有测验成绩，以下依据课堂、作业与试卷分析记录汇总。';
     }
+    function trimEnd(s) { return String(s || '').replace(/[\s。；;，,、]+$/, ''); }
     var weak = {};
-    (ctx.papers || []).forEach(function (p) {
+    papers.forEach(function (p) {
       (p.tags || []).forEach(function (t) { weak[t] = (weak[t] || 0) + 1; });
     });
     var weakList = Object.keys(weak).sort(function (a, b) { return weak[b] - weak[a]; }).slice(0, 3);
     if (weakList.length) txt += '从试卷分析看，' + weakList.join('、') + '是反复出现的薄弱点，需要在下一阶段优先解决。';
+    else if (ctx.paperNote) txt += '试卷分析记录显示：' + trimEnd(String(ctx.paperNote).replace(/\s+/g, ' ').slice(0, 180)) + '。';
     if (ctx.kb && ctx.kb.length) {
       var low = ctx.kb.slice(0, 3);
       txt += '逐题知识点统计显示：' + low.map(function (o) { return o.topic + ' 正确率 ' + o.rate + '%'; }).join('、') + '。';
     }
-    function trimEnd(s) { return String(s || '').replace(/[\s。；;，,、]+$/, ''); }
     if (ctx.classNote) txt += '课堂表现方面，' + trimEnd(ctx.classNote) + '。';
     else txt += '课堂参与度方面，整体表现积极，能跟上课堂节奏。';
     if (ctx.homeNote) txt += '作业情况：' + trimEnd(ctx.homeNote) + '。';

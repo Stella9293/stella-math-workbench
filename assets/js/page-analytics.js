@@ -11,6 +11,69 @@
 
   function esc(s) { return App.util.esc(s); }
 
+  /* ---------------- 课堂表现 / 作业情况：常用描述（点一下追加） ---------------- */
+  var PHRASES = {
+    class: {
+      good: ['上课紧跟节奏', '主动举手回答问题', '能提出自己的疑问', '笔记完整清晰',
+        '小组讨论积极', '课堂练习按时完成'],
+      warn: ['上课容易困倦', '上课走神', '跟不上课堂进度', '不敢提问',
+        '课堂练习偏慢', '依赖提示才动笔']
+    },
+    homework: {
+      good: ['作业按时提交', '作业完成质量高', '步骤完整、书写规范', '错题订正及时', '主动加练'],
+      warn: ['作业迟交', '书写潦草', '步骤跳跃、缺少过程', '作业订正不及时',
+        '计算错误较多', '漏做题目']
+    }
+  };
+
+  function phraseHTML(type, targetId) {
+    var g = PHRASES[type] || PHRASES.class;
+    function chips(arr, tone) {
+      return arr.map(function (p) {
+        return '<button type="button" class="chip phrase ' + tone + '" data-phrase="' + esc(p) + '" data-target="' + targetId + '">' +
+          esc(p) + '</button>';
+      }).join('');
+    }
+    return '<div class="phrase-box">' +
+      '<div class="phrase-row"><span class="phrase-lab">常用</span>' + chips(g.good, 'good') + '</div>' +
+      '<div class="phrase-row"><span class="phrase-lab warn">留意</span>' + chips(g.warn, 'warn') + '</div>' +
+      '<div class="tiny muted phrase-tip">点一下把这句追加到文字框，可继续手改；再点一次不重复添加。</div>' +
+      '</div>';
+  }
+
+  /* 把短语追加到文本框（已有就跳过） */
+  function insertPhrase(ta, p) {
+    if (!ta || !p) return false;
+    var v = ta.value;
+    if (v.indexOf(p) >= 0) return false;
+    var sep = '';
+    if (v.trim()) sep = /[，,、；;。\s]$/.test(v) ? '' : '；';
+    ta.value = v.replace(/\s+$/, '') + sep + p;
+    ta.focus();
+    try { ta.selectionStart = ta.selectionEnd = ta.value.length; } catch (e) { }
+    return true;
+  }
+
+  function bindPhraseChips(scope) {
+    scope.querySelectorAll('[data-phrase]').forEach(function (b) {
+      b.onclick = function () {
+        var ta = scope.querySelector('#' + b.dataset.target);
+        if (!ta) return;
+        if (!insertPhrase(ta, b.dataset.phrase)) {
+          App.ui.toast('这句已经在框里了', '', 1400);
+        }
+      };
+    });
+  }
+
+  /* 左侧学生列表：记住滚动位置，换学生后不要跳回顶部 */
+  function bindStuScroll(el, st) {
+    var box = el.querySelector('.stu-list');
+    if (!box) return;
+    if (st.stuScroll > 0) box.scrollTop = st.stuScroll;
+    box.addEventListener('scroll', function () { st.stuScroll = box.scrollTop; });
+  }
+
   /* 知识点标签区标题（随选择实时更新） */
   function tagLabelText(system, pool, tags) {
     return '薄弱知识点 · ' + system + ' 共 ' + pool.length + ' 项，已选 ' + tags.length + ' 项（可多选、可自定义）';
@@ -210,6 +273,7 @@
           html += '<textarea class="textarea" id="recText" placeholder="' + (type === 'class'
             ? '例如：今天主动回答了判别式的问题，但在配方法上仍然漏项…'
             : '例如：作业完成质量高，第 7 题换元后忘记回代…') + '"></textarea>';
+          html += phraseHTML(type, 'recText');
 
           if (type === 'homework') {
             html += '<div class="row wrap mt12" style="gap:8px"><button class="btn sm" id="recImg">+ 上传作业图片</button>' +
@@ -224,7 +288,10 @@
           recs.forEach(function (r) {
             html += '<div class="note-card mb8"><div class="nc-head">' +
               '<span class="badge gray">' + U.dateLabel(r.date) + '</span>' +
-              '<span class="spacer"></span><button class="icon-btn" data-delrec="' + r.id + '">✕</button></div>' +
+              (r.editedAt ? '<span class="tiny muted">已编辑</span>' : '') +
+              '<span class="spacer"></span>' +
+              '<button class="icon-btn" data-editrec="' + r.id + '" title="编辑这条记录">✎</button>' +
+              '<button class="icon-btn" data-delrec="' + r.id + '">✕</button></div>' +
               '<div class="nc-text">' + esc(r.text) + '</div>';
             if (r.images && r.images.length) {
               html += '<div class="img-strip">' + r.images.map(function (src) {
@@ -238,7 +305,7 @@
         el.innerHTML = html;
 
         el.querySelectorAll('[data-acls]').forEach(function (b) {
-          b.onclick = function () { st.classId = b.dataset.acls; st.studentId = null; db.meta.currentClassId = st.classId; App.store.save(); App.refreshTopbar(); App.render(); };
+          b.onclick = function () { st.classId = b.dataset.acls; st.studentId = null; st.stuScroll = 0; db.meta.currentClassId = st.classId; App.store.save(); App.refreshTopbar(); App.render(); };
         });
         el.querySelectorAll('[data-tab]').forEach(function (b) {
           b.onclick = function () { st.tab = b.dataset.tab; st.draftImages = []; App.render(); };
@@ -252,6 +319,81 @@
             App.store.save(); App.render();
           };
         });
+        bindStuScroll(el, st);
+        bindPhraseChips(el);
+        el.querySelectorAll('[data-editrec]').forEach(function (b) {
+          b.onclick = function () {
+            var rec = db.records.filter(function (x) { return x.id === b.dataset.editrec; })[0];
+            if (rec) openEditRecord(rec);
+          };
+        });
+
+        /* 编辑已保存的记录：日期 / 文字 / 图片都能改 */
+        function openEditRecord(rec) {
+          var imgs = (rec.images || []).slice();
+          var label = type === 'class' ? '课堂表现' : '作业情况';
+          var body = '<div class="field"><label>记录日期</label>' +
+            '<input class="input" id="erDate" type="date" value="' + esc(rec.date || U.todayISO()) + '" style="max-width:180px"></div>' +
+            '<div class="field"><label>内容</label>' +
+            '<textarea class="textarea" id="erText" style="min-height:130px">' + esc(rec.text || '') + '</textarea></div>' +
+            phraseHTML(type, 'erText') +
+            (type === 'homework'
+              ? '<div class="field mt12"><label>作业图片（<span id="erCount">' + imgs.length + '</span> 张）</label>' +
+                '<div class="img-strip" id="erImgs"></div>' +
+                '<div class="row mt8" style="gap:8px"><button class="btn sm" id="erAdd">+ 添加图片</button>' +
+                '<span class="tiny muted">点缩略图看大图，✕ 删除</span></div></div>'
+              : '') +
+            '<div class="tiny muted">保存后这条记录的日期、文字与图片都会更新，历史位置不变。</div>';
+
+          var m = App.ui.modal({
+            title: '编辑 · ' + label,
+            width: 600,
+            body: body,
+            footer: [
+              { label: '取消', onClick: function (close) { close(); } },
+              {
+                label: '保存修改', cls: 'primary', onClick: function (close, root) {
+                  var txt = (root.querySelector('#erText').value || '').trim();
+                  var d = root.querySelector('#erDate').value || rec.date || U.todayISO();
+                  if (!txt && !imgs.length) { App.ui.toast('内容不能为空', 'err'); return; }
+                  rec.text = txt; rec.date = d; rec.images = imgs.slice(); rec.editedAt = Date.now();
+                  App.store.save(); close(); App.render();
+                  App.ui.toast('已更新', 'ok');
+                }
+              }
+            ],
+            onMount: function (root) {
+              bindPhraseChips(root);
+              if (type !== 'homework') { var t0 = root.querySelector('#erText'); if (t0) t0.focus(); return; }
+              var strip = root.querySelector('#erImgs');
+              function paint() {
+                strip.innerHTML = imgs.map(function (src, i) {
+                  return '<div class="thumb-wrap"><img class="thumb" src="' + src + '"><span class="x" data-errm="' + i + '">✕</span></div>';
+                }).join('');
+                strip.querySelectorAll('[data-errm]').forEach(function (x) {
+                  x.onclick = function () { imgs.splice(parseInt(x.dataset.errm, 10), 1); paint(); };
+                });
+                strip.querySelectorAll('.thumb-wrap').forEach(function (w, i) {
+                  w.querySelector('img').onclick = function () { App.ui.lightbox(imgs[i]); };
+                });
+                var c = root.querySelector('#erCount');
+                if (c) c.textContent = imgs.length;
+              }
+              paint();
+              root.querySelector('#erAdd').onclick = function () {
+                App.files.pick({ accept: 'image/*', multiple: true }).then(function (files) {
+                  if (!files || !files.length) return;
+                  Promise.all(Array.prototype.map.call(files, function (f) { return App.files.readImage(f); })).then(function (arr) {
+                    arr.forEach(function (a) { imgs.push(a); });
+                    paint();
+                    App.ui.toast('已添加 ' + arr.length + ' 张图片', 'ok');
+                  });
+                });
+              };
+            }
+          });
+          return m;
+        }
         el.querySelectorAll('[data-zoom]').forEach(function (img) {
           img.onclick = function () {
             var r = db.records.filter(function (x) { return x.id === img.dataset.zoom; })[0];
@@ -1145,7 +1287,8 @@
         html += '<label class="row" style="gap:8px;padding:6px 4px;cursor:pointer">' +
           '<input type="checkbox" data-sp="' + p.id + '" ' + (sd.papers.indexOf(p.id) >= 0 ? 'checked' : '') + '>' +
           '<span style="flex:1;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + U.dateLabel(p.date) + ' · ' + esc(p.paperName || '试卷分析') + '</span>' +
-          '<span class="tiny muted">' + (p.tags || []).length + ' 标签</span></label>';
+          '<span class="tiny muted" style="margin-left:6px">' + ((p.tags || []).length ? (p.tags || []).length + ' 标签'
+            : (String(p.report || p.aiComment || p.text || '').trim() ? '纯文字' : '无内容')) + '</span></label>';
       });
       html += '<button class="btn primary block mt16" id="sumGen">汇总生成综合分析</button></div></div>';
 
@@ -1182,7 +1325,7 @@
       html += '<div class="card"><div class="card-head"><h3><span class="card-title-dot"></span>综合分析 · ' + esc(cur2.en) + '</h3>' +
         '<div class="row" style="gap:6px"><button class="btn sm" id="sumSave">保存</button>' +
         '<button class="btn sm" id="sumWord">导出 Word</button></div></div>';
-      html += '<textarea class="textarea" id="sumText" style="min-height:200px" placeholder="点击左侧「汇总生成综合分析」，会自动汇总课堂表现、作业情况、测验成绩与试卷分析（薄弱知识点）"><\/textarea>';
+      html += '<textarea class="textarea" id="sumText" style="min-height:200px" placeholder="点击左侧「汇总生成综合分析」，会自动汇总课堂表现、作业情况、测验成绩与试卷分析（知识点标签与自行输入的文字都会纳入）"><\/textarea>';
 
       html += '<div class="divider"></div><div class="tiny muted mb8">历史综合分析（' + summaries.length + '）</div>';
       if (!summaries.length) html += '<div class="empty">还没有保存过综合分析</div>';
@@ -1245,26 +1388,72 @@
         };
       });
 
+      /* 试卷分析材料：知识点类取薄弱项，自由文字类整段带出来 */
+      var psFull = [];
+      function paperDigest(p) {
+        var body = p.report || p.aiComment || '';
+        var tags = (p.tags || []).filter(Boolean);
+        var layout = (p.layout || []).filter(Boolean);
+        var weak = mdSection(body, ['知识点薄弱', '薄弱项', '薄弱点', '薄弱环节', '失分', '错因', '错误原因']);
+        var norm = mdSection(body, ['卷面', '规范', '书写']);
+        var segs = [];
+        if (tags.length) segs.push('知识点：' + tags.join('、'));
+        if (layout.length) segs.push('卷面问题：' + layout.join('、'));
+        if (weak) segs.push('薄弱点：' + App.md.plain(weak, 300));
+        if (norm) segs.push('规范：' + App.md.plain(norm, 140));
+        var note = String(p.text || '').trim();
+        if (note) segs.push('卷面记录：' + App.md.plain(note, 220));
+        if (!weak && !norm) {
+          /* 没有小标题：老师自己输入的整段分析，直接作为要点 */
+          var all = App.md.plain(body, 420);
+          if (all) segs.push('分析原文：' + all);
+        }
+        var low = (p.scoreTable || []).filter(function (r) {
+          var a = parseFloat(r.awarded), f = parseFloat(r.full);
+          return String(r.no || '').trim() && !isNaN(a) && f > 0 && a / f < 0.6;
+        }).slice(0, 5).map(function (r) {
+          return '第 ' + r.no + ' 题 ' + r.awarded + '/' + r.full +
+            (r.topic ? '（' + r.topic + '）' : '') + (r.note ? '：' + r.note : '');
+        });
+        if (low.length) segs.push('失分题：' + low.join('；'));
+        return segs.join('｜');
+      }
+      function paperText() {
+        return psFull.map(function (p) {
+          var d = paperDigest(p);
+          return '【' + (p.date || '') + (p.paperName ? ' ' + p.paperName : '') + '】' + (d || '（无文字内容）');
+        }).join('\n');
+      }
+
       el.querySelector('#sumGen').onclick = function () {
         var items = sd.exams.map(function (id) {
           var e = db.exams.filter(function (x) { return x.id === id; })[0];
           return e ? { exam: e, score: e.scores[cur2.id] != null ? parseFloat(e.scores[cur2.id]) : null } : null;
         }).filter(Boolean).sort(function (a, b) { return (a.exam.date || '').localeCompare(b.exam.date || ''); });
         var ps = sd.papers.map(function (id) { return db.papers.filter(function (x) { return x.id === id; })[0]; }).filter(Boolean);
-        if (!items.length) { App.ui.toast('至少选择一次测验', 'err'); return; }
+        psFull = ps;
 
         var classNotes = db.records.filter(function (r) { return r.studentId === cur2.id && r.type === 'class'; })
           .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); }).slice(0, 3);
         var hwNotes = db.records.filter(function (r) { return r.studentId === cur2.id && r.type === 'homework'; })
           .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); }).slice(0, 3);
+        if (!items.length && !classNotes.length && !hwNotes.length && !ps.length) {
+          App.ui.toast('先录入或选择一些材料（测验、课堂、作业、试卷分析任一即可）', 'err', 3200);
+          return;
+        }
         var kbRows2 = kbStats();
         var kbTxt = kbRows2.map(function (o) { return o.topic + ' ' + o.rate + '%'; }).join('；');
         var classTxt = classNotes.map(function (r) { return '（' + r.date + '）' + r.text; }).join(' ');
         var hwTxt = hwNotes.map(function (r) { return '（' + r.date + '）' + r.text; }).join(' ');
+        var paperTxt = paperText();
+        /* 本地模板用更口语的片段：直接取老师写的正文与卷面记录 */
+        var paperPlain = ps.map(function (p) {
+          return App.md.plain([p.report || p.aiComment || '', p.text || ''].join(' '), 160);
+        }).filter(Boolean).join('；');
 
         if (!App.ai.configured()) {
           sd.text = App.ai.summaryComment({
-            student: cur2, items: items, papers: ps,
+            student: cur2, items: items, papers: ps, paperNote: paperPlain,
             classNote: classTxt.slice(0, 200), homeNote: hwTxt.slice(0, 200), kb: kbRows2
           });
           sumText.value = sd.text;
@@ -1275,31 +1464,26 @@
         btn.disabled = true; btn.textContent = '生成中…';
         var prompt = '请根据以下材料，为一位国际数学课程学生写一段 400-500 字的中文综合评语，直接输出正文，分 3 段，不要用编号列表，不要加标题。\n' +
           '学生：' + cur2.en + '（' + cur2.zh + '），班级：' + U.clsName(st.classId) + '，课程体系：' + (sumCls ? sumCls.system : '') + '\n' +
-          '【一、测验成绩】' + items.map(function (i) {
+          '【一、测验成绩】' + (items.length ? items.map(function (i) {
             return i.exam.name + '(' + i.exam.date + ') ' + (i.score == null ? '缺考'
               : i.score + '/' + i.exam.full + (i.exam.full ? '（' + U.round1(i.score / i.exam.full * 100) + '%）' : ''));
-          }).join('；') + '\n' +
+          }).join('；') : '暂无测验成绩') + '\n' +
           '【二、课堂表现】' + (classTxt || '暂无记录') + '\n' +
           '【三、作业情况】' + (hwTxt || '暂无记录') + '\n' +
-          '【四、试卷分析】' + (ps.length ? ps.map(function (p) {
-            var weak = mdSection(p.report || p.aiComment, ['知识点薄弱', '薄弱项', '逐题失分']);
-            var norm = mdSection(p.report || p.aiComment, ['卷面', '规范']);
-            return '【' + (p.date || '') + '】' + (p.tags || []).join('、') +
-              (weak ? '｜薄弱点：' + App.md.plain(weak, 260) : '') +
-              (norm ? '｜规范：' + App.md.plain(norm, 120) : '');
-          }).join('\n') : '暂无记录') + '\n' +
+          '【四、试卷分析】' + (paperTxt || '暂无记录') + '\n' +
           '【五、知识点正确率】' + (kbTxt || '暂无逐题知识点数据') + '\n' +
           '要求：1）第一段整合课堂表现与作业情况，写清具体行为与变化，不要只说"认真"；' +
-          '2）第二段讲测验成绩与知识点掌握，必须引用具体分数、正确率（如"判别式 60%"）与题号依据；' +
+          '2）第二段讲测验成绩、试卷分析与知识点掌握，必须引用具体分数、正确率（如"判别式 60%"）与题号依据；' +
+          '试卷分析里若是老师手写的整段文字（没有知识点标签），要把它提到的具体问题（题号、错因、习惯）写进去，不要忽略；' +
           '3）第三段给出三条下一阶段可执行建议（写清题量/频率/检验方式）；' +
-          '4）四类材料都要用到，若某类缺失就跳过，不要编造；5）语气专业、有温度，禁止「继续努力」「再接再厉」这类空话。';
+          '4）材料缺失就跳过，不要编造；5）语气专业、有温度，禁止「继续努力」「再接再厉」这类空话。';
         App.ai.chat({ prompt: prompt, temperature: 0.4, maxTokens: 2400, timeout: 180000 }).then(function (t) {
           sd.text = t; sumText.value = t;
           btn.disabled = false; btn.textContent = '汇总生成综合分析';
           App.ui.toast('AI 综合分析已生成', 'ok');
         }).catch(function (e) {
           sd.text = App.ai.summaryComment({
-            student: cur2, items: items, papers: ps,
+            student: cur2, items: items, papers: ps, paperNote: paperPlain,
             classNote: classTxt.slice(0, 200), homeNote: hwTxt.slice(0, 200), kb: kbRows2
           });
           sumText.value = sd.text;
@@ -1359,7 +1543,7 @@
     var U = App.util;
     el.querySelectorAll('[data-acls]').forEach(function (b) {
       b.onclick = function () {
-        st.classId = b.dataset.acls; st.studentId = null; st.examId = null;
+        st.classId = b.dataset.acls; st.studentId = null; st.examId = null; st.stuScroll = 0;
         st.paperDraft = null; st.summaryDraft = null;
         db.meta.currentClassId = st.classId; App.store.save(); App.refreshTopbar(); App.render();
       };
@@ -1374,6 +1558,7 @@
         App.render();
       };
     });
+    bindStuScroll(el, st);
   }
 
   /* ---------------- 截图：页面级 ⌘V，只作用于「试卷分析」草稿 ---------------- */
