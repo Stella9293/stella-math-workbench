@@ -767,7 +767,8 @@
         cardReport += '<div class="prog-line" id="paProg" style="display:none"></div>';
 
         if (showRaw) {
-          cardReport += '<textarea class="textarea report-raw" id="paRaw" placeholder="报告原文（Markdown）」>' + esc(reportText) + '</textarea>';
+          cardReport += '<textarea class="textarea report-raw" id="paRaw" placeholder="直接在这里写本次分析：可以不对应任何题目，写清问题、原因与建议即可；支持 Markdown（# 标题 / - 列表）">' + esc(reportText) + '</textarea>' +
+            '<div class="tiny muted mt8">写完点右上角「保存分析」就会存入下方「历史分析」；想看成稿效果点「预览排版」。不写题目、不填分数也能保存。</div>';
         } else if (reportText) {
           cardReport += '<div class="report-body md-report" id="paReport">' + App.md.render(reportText) + '</div>';
         } else {
@@ -831,6 +832,13 @@
         el.innerHTML = html;
         bindCommon(el, st, db);
 
+        /* 按 id 绑事件：元素不存在就跳过，避免一处 HTML 写坏导致整页渲染失败 */
+        function hook(id, ev, fn) {
+          var n = el.querySelector('#' + id);
+          if (n) n[ev] = fn;
+          return n;
+        }
+
         /* ---------- 逐题得分表 ---------- */
         function scoreRowsHTML(rows) {
           return rows.map(function (r, i) {
@@ -863,12 +871,17 @@
 
         var rowsBody = el.querySelector('#paRows');
         function rebindRows() {
+          if (!rowsBody) return;
+          function paintHeat() {
+            var h = el.querySelector('#paHeat');
+            if (h) h.innerHTML = heatHTML(draft.scoreTable);
+          }
           rowsBody.querySelectorAll('[data-srow]').forEach(function (tr) {
             var idx = parseInt(tr.dataset.srow, 10);
             tr.querySelectorAll('[data-sf]').forEach(function (inp) {
               inp.oninput = function () {
                 draft.scoreTable[idx][inp.dataset.sf] = inp.value;
-                el.querySelector('#paHeat').innerHTML = heatHTML(draft.scoreTable);
+                paintHeat();
               };
             });
             var del = tr.querySelector('[data-sdel]');
@@ -876,40 +889,48 @@
               draft.scoreTable.splice(idx, 1);
               while (draft.scoreTable.length < 3) draft.scoreTable.push({ no: '', awarded: '', full: '', topic: '', note: '' });
               rowsBody.innerHTML = scoreRowsHTML(draft.scoreTable);
-              el.querySelector('#paHeat').innerHTML = heatHTML(draft.scoreTable);
+              paintHeat();
               rebindRows();
             };
           });
         }
         rebindRows();
 
-        el.querySelector('#paAddRow').onclick = function () {
+        hook('paAddRow', 'onclick', function () {
           draft.scoreTable.push({ no: '', awarded: '', full: '', topic: '', note: '' });
           rowsBody.innerHTML = scoreRowsHTML(draft.scoreTable);
           rebindRows();
-        };
+        });
 
         /* ---------- 测验联动 ---------- */
-        el.querySelector('#paExam').onchange = function () {
+        hook('paExam', 'onchange', function () {
           draft.examId = this.value;
           var ex = curExam();
           if (ex) {
-            if (!draft.full) { draft.full = String(ex.full); el.querySelector('#paFull').value = ex.full; }
+            if (!draft.full) {
+              draft.full = String(ex.full);
+              var fEl = el.querySelector('#paFull');
+              if (fEl) fEl.value = ex.full;
+            }
             var s = ex.scores[cur2.id];
-            if (s != null) { draft.score = String(s); el.querySelector('#paScore').value = s; }
+            if (s != null) {
+              draft.score = String(s);
+              var sEl = el.querySelector('#paScore');
+              if (sEl) sEl.value = s;
+            }
             if (!draft.paperName) draft.paperName = ex.name;
-            if (!draft.text) { /* 保持 */ }
           }
-        };
-        el.querySelector('#paFull').oninput = function () { draft.full = this.value; };
-        el.querySelector('#paPaperName').oninput = function () { draft.paperName = this.value; };
-        el.querySelector('#paScore').oninput = function () { draft.score = this.value; };
-        el.querySelector('#paMark').oninput = function () { draft.markScheme = this.value; };
-        el.querySelector('#paText').oninput = function () { draft.text = this.value; };
+        });
+        hook('paFull', 'oninput', function () { draft.full = this.value; });
+        hook('paPaperName', 'oninput', function () { draft.paperName = this.value; });
+        hook('paScore', 'oninput', function () { draft.score = this.value; });
+        hook('paMark', 'oninput', function () { draft.markScheme = this.value; });
+        hook('paText', 'oninput', function () { draft.text = this.value; });
 
         /* ---------- 截图：只接收粘贴，不做上传 ---------- */
         var imgBox = el.querySelector('#paImgs');
         function paintImgs() {
+          if (!imgBox) return;
           imgBox.innerHTML = draft.images.map(function (src, i) {
             return '<div class="thumb-wrap"><img class="thumb" src="' + src + '"><span class="x" data-rmp="' + i + '">✕</span></div>';
           }).join('');
@@ -982,7 +1003,7 @@
             b.classList.toggle('active');
           };
         });
-        el.querySelector('#paTagAdd').onclick = function () {
+        hook('paTagAdd', 'onclick', function () {
           App.ui.prompt({ title: '添加知识点', label: '知识点名称', placeholder: '如 三角恒等变换' }).then(function (v) {
             if (!v) return;
             var added = App.kb.has(sysNow, v) ? false : App.kb.addOne(sysNow, '自定义', v);
@@ -990,7 +1011,7 @@
             App.render();
             App.ui.toast(added ? '已加入知识点库并选中' : '已选中「' + v + '」', 'ok');
           });
-        };
+        });
 
         /* ---------- 知识点库 ---------- */
         /* 库里删掉的知识点，同时从当前草稿里撤掉（分析匹配来的保留，作为证据） */
@@ -1003,19 +1024,23 @@
         }
         var kbSel = el.querySelector('#kbSysSel');
         if (kbSel) kbSel.onchange = function () { draft.kbSystem = this.value; App.render(); };
-        el.querySelector('#kbImportBtn').onclick = function () {
+        hook('kbImportBtn', 'onclick', function () {
           App.kb.openImport(sysNow, function () { pruneDraftTags(); App.render(); });
-        };
-        el.querySelector('#kbManageBtn').onclick = function () {
+        });
+        hook('kbManageBtn', 'onclick', function () {
           App.kb.openManage(sysNow, function () { pruneDraftTags(); App.render(); });
-        };
+        });
 
         function collect() {
-          draft.text = el.querySelector('#paText').value;
-          draft.markScheme = el.querySelector('#paMark').value;
-          draft.examId = el.querySelector('#paExam').value;
-          draft.full = el.querySelector('#paFull').value;
-          draft.score = el.querySelector('#paScore').value;
+          function val(id, dflt) {
+            var n = el.querySelector('#' + id);
+            return n ? n.value : (dflt || '');
+          }
+          draft.text = val('paText', draft.text);
+          draft.markScheme = val('paMark', draft.markScheme);
+          draft.examId = val('paExam', draft.examId);
+          draft.full = val('paFull', draft.full);
+          draft.score = val('paScore', draft.score);
           draft.date = draft.date || U.todayISO();
           var ex0 = curExam();
           var pn = el.querySelector('#paPaperName');
@@ -1080,7 +1105,7 @@
         };
 
         /* ---------- 粘贴分析结果（主路径，纯本地解析） ---------- */
-        el.querySelector('#paPaste').onclick = function () {
+        hook('paPaste', 'onclick', function () {
           App.paperio.openPaste().then(function (r) {
             if (!r) return;
             var d = collect();
@@ -1118,28 +1143,40 @@
               if (box) box.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 80);
           });
-        };
+        });
 
         /* ---------- 报告工具 ---------- */
-        el.querySelector('#paToggle').onclick = function () {
+        hook('paToggle', 'onclick', function () {
           if (st.reportRaw) {
             var ta = el.querySelector('#paRaw');
             if (ta) { draft.report = ta.value; draft.comment = App.md.plain(ta.value, 800); }
           }
           st.reportRaw = !st.reportRaw;
           App.render();
-        };
-        el.querySelector('#paCopy').onclick = function () {
+          /* 进入「自己写」状态后直接把光标放进文本框 */
+          if (st.reportRaw) setTimeout(function () {
+            var box = document.querySelector('#paRaw');
+            if (!box) return;
+            box.focus();
+            try { box.setSelectionRange(box.value.length, box.value.length); } catch (e) { }
+          }, 40);
+        });
+        hook('paCopy', 'onclick', function () {
           var t = draft.report || draft.comment || '';
           if (!t) { App.ui.toast('还没有报告', 'err'); return; }
           App.util.copy(t);
-        };
+        });
         function doSave() {
           var d = collect();
           var ta = el.querySelector('#paRaw');
           if (ta) { d.report = ta.value; d.comment = App.md.plain(ta.value, 800); }
           var body = d.report || d.comment;
-          if (!body) { App.ui.toast('先生成报告，或点「查看原文」手动填写', 'err'); document.querySelector('#paReportCard').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+          if (!body) {
+            App.ui.toast('还没有内容：点「查看原文」直接写，或先粘贴分析结果', 'err');
+            var card = document.querySelector('#paReportCard');
+            if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            return;
+          }
           db.papers.push({
             id: 'pp_' + Date.now().toString(36), studentId: st.studentId, classId: st.classId,
             examId: d.examId || '', date: d.date || U.todayISO(), images: d.images.slice(),
@@ -1150,7 +1187,7 @@
               return { no: r.no, awarded: r.awarded, full: r.full, topic: r.topic || '', note: r.note };
             }),
             markScheme: d.markScheme, ocrText: d.ocrText, model: d.model || '',
-            paperName: d.paperName || '', kbSystem: sysNow,
+            paperName: d.paperName || ((d.examId) ? '' : '手写分析'), kbSystem: sysNow,
             full: fullVal(), score: scoreVal()
           });
           d.tags.forEach(function (t) {
@@ -1163,9 +1200,8 @@
           App.render();
           App.ui.toast('分析已保存', 'ok');
         }
-        el.querySelector('#paSave').onclick = doSave;
-        var save2 = el.querySelector('#paSave2');
-        if (save2) save2.onclick = doSave;
+        hook('paSave', 'onclick', doSave);
+        hook('paSave2', 'onclick', doSave);
 
         el.querySelectorAll('[data-open-paper]').forEach(function (b) {
           b.onclick = function () {
@@ -1446,9 +1482,24 @@
         var classTxt = classNotes.map(function (r) { return '（' + r.date + '）' + r.text; }).join(' ');
         var hwTxt = hwNotes.map(function (r) { return '（' + r.date + '）' + r.text; }).join(' ');
         var paperTxt = paperText();
-        /* 本地模板用更口语的片段：直接取老师写的正文与卷面记录 */
+        /* 本地模板用更口语的片段：直接取老师写的正文与卷面记录，去掉 1. / - 这类行首标记 */
+        function plainNote(s) {
+          var lines = String(s || '').split(/\r?\n+/).map(function (l) {
+            return l.replace(/^\s*(?:[-*·•>]+|\d+\s*[.、)）]|[(（]\s*\d+\s*[)）])\s*/, '')
+              .replace(/[；;，,、。]+$/, '').trim();
+          }).filter(Boolean);
+          var out = '';
+          lines.forEach(function (l) {
+            if (!out) out = l;
+            else out += /[：:]$/.test(out) ? l : '；' + l;
+          });
+          return out;
+        }
         var paperPlain = ps.map(function (p) {
-          return App.md.plain([p.report || p.aiComment || '', p.text || ''].join(' '), 160);
+          var one = plainNote(p.report || p.aiComment);
+          var two = plainNote(p.text);
+          var both = [one, two].filter(Boolean).join('；');
+          return App.md.plain(both, 220);
         }).filter(Boolean).join('；');
 
         if (!App.ai.configured()) {
